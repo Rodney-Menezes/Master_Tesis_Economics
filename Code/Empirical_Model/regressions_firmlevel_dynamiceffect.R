@@ -1,326 +1,200 @@
 # --------------------------------------------------------
-# Dynamic Effects (horizonte 0–12 trimestres), usando mps
+# 0) Cargar librerías necesarias
 # --------------------------------------------------------
-
-# Instalar paquetes necesarios (si aún no lo están)
-install.packages("kableExtra")
-
-library(haven)      # read_dta()
-library(zoo)        # as.yearqtr()
-library(purrr)      # map(), map_dfc()
-library(fixest)     # feols()
-library(dplyr)
-library(tidyr)
-library(knitr)
-library(kableExtra)
-
-# ------------------------------------------------------------------
-# Figure 1: Dynamics of Differential Response to Monetary Shocks
-# ------------------------------------------------------------------
-
-# 1) Leer datos y convertir dateq a trimestral
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(dateq = as.yearqtr(dateq))
-
-# 2) Generar controles firm-level si no existen
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # Crecimiento de ventas y estandarizado
-    rsales_g     = log(saleq) - log(lag(saleq)),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    # Tamaño
-    size_std     = (log(atq) - mean(log(atq), na.rm = TRUE)) / sd(log(atq), na.rm = TRUE),
-    # Liquidez
-    sh_current_a_std = (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE)
-  ) %>%
-  ungroup()
-
-# 3) Winsorizar, de-medial y estandarizar leverage y dd, luego crear interacciones con mps
-winsorize <- function(x, p = 0.005) {
-  lo <- quantile(x, p, na.rm = TRUE)
-  hi <- quantile(x, 1 - p, na.rm = TRUE)
-  pmin(pmax(x, lo), hi)
-}
-
-df <- df %>%
-  mutate(
-    leverage_win = winsorize(leverage),
-    dd_win       = winsorize(dd)
-  ) %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    lev_dev = leverage_win - mean(leverage_win, na.rm = TRUE),
-    dd_dev  = dd_win       - mean(dd_win,       na.rm = TRUE),
-    lev_std = lev_dev / sd(lev_dev, na.rm = TRUE),
-    dd_std  = dd_dev  / sd(dd_dev,  na.rm = TRUE),
-    # Interacciones con mps (raw shock)
-    lev_wins_dem_std = lev_std * mps,
-    d2d_wins_dem_std = dd_std  * mps
-  ) %>%
-  ungroup()
-
-# 4) Construir cumFh_dlog_capital para h = 0...12
-df_dyn <- df %>%
-  arrange(name, dateq) %>%
-  group_by(name) %>%
-  do({
-    tmp <- .
-    # Para cada horizonte h de 0 a 12, acumular sumas de dlog_capital
-    for (h in 0:12) {
-      tmp[[paste0("cumF", h, "_dlog_capital")]] <-
-        rowSums(
-          map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
-          na.rm = TRUE
-        )
-    }
-    tmp
-  }) %>%
-  ungroup()
-
-# 5) Definir controles firm-level para la regresión
-controls_firm <- c("rsales_g_std", "size_std", "sh_current_a_std")
-
-# 6) Estimar dinámicas para h = 0…12
-
-# Leverage
-res_lev <- map(0:12, function(h) {
-  fml <- as.formula(paste0(
-    "cumF", h, "_dlog_capital ~ ",
-    "lev_wins_dem_std + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~name + Country_x)
-})
-
-# Distance-to-default
-res_dd <- map(0:12, function(h) {
-  fml <- as.formula(paste0(
-    "cumF", h, "_dlog_capital ~ ",
-    "d2d_wins_dem_std + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~name + Country_x)
-})
-
-# 7) Extraer coeficientes y errores
-lev_coefs <- tibble(
-  horizon = 0:12,
-  beta     = map_dbl(res_lev, ~ coef(.x)["lev_wins_dem_std"]),
-  se       = map_dbl(res_lev, ~ sqrt(vcov(.x)["lev_wins_dem_std", "lev_wins_dem_std"]))
-)
-dd_coefs <- tibble(
-  horizon = 0:12,
-  beta     = map_dbl(res_dd, ~ coef(.x)["d2d_wins_dem_std"]),
-  se       = map_dbl(res_dd, ~ sqrt(vcov(.x)["d2d_wins_dem_std", "d2d_wins_dem_std"]))
-)
-
-# 8) Guardar resultados (opcional) y mostrar
-write.csv(lev_coefs,
-          file.path(base_dir, "dynamics_lev_0_12.csv"),
-          row.names = FALSE)
-write.csv(dd_coefs,
-          file.path(base_dir, "dynamics_dd_0_12.csv"),
-          row.names = FALSE)
-
-print(lev_coefs)
-print(dd_coefs)
-
-# 9) Preparar tabla combinada para presentación
-table_dyn <- lev_coefs %>%
-  rename(beta_lev = beta, se_lev = se) %>%
-  left_join(
-    dd_coefs %>% rename(beta_dd = beta, se_dd = se),
-    by = "horizon"
-  ) %>%
-  mutate(
-    Leverage = sprintf("%.3f (%.3f)", beta_lev, se_lev),
-    `Dist-to-Default` = sprintf("%.3f (%.3f)", beta_dd, se_dd)
-  ) %>%
-  select(Horizon = horizon, Leverage, `Dist-to-Default`)
-
-# 10) Imprimir con kableExtra
-table_dyn %>%
-  kable(
-    caption = "Efecto dinámico: coeficiente (error estándar) para h = 0–12 trimestres",
-    align   = c("c", "c", "c")
-  ) %>%
-  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
-
-
-
-
-# --------------------------------------------------------
-# Figure 1: Dinámica de Respuesta - Gráficos en R (horizonte 0–12)
-# --------------------------------------------------------
-
-library(ggplot2)
-library(readr)
-library(gridExtra)
-library(grid)      # para grid.newpage() y grid.draw()
-
-# 1) Leer resultados para horizonte 0–12 (suprimir avisos de spec)
-base_dir  <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-lev_coefs <- read_csv(file.path(base_dir, "dynamics_lev_0_12.csv"),     show_col_types = FALSE)
-dd_coefs  <- read_csv(file.path(base_dir, "dynamics_dd_0_12.csv"),      show_col_types = FALSE)
-
-# 2) Gráfico para Leverage × Shock
-p_lev <- ggplot(lev_coefs, aes(x = horizon, y = beta)) +
-  geom_line(size = 1) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se),
-              alpha = 0.2, fill = "grey70") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    x        = "Horizonte (trimestres)",
-    y        = "Efecto acumulado de inversión",
-    title    = "Dinámica de Respuesta: Leverage × Shock",
-    subtitle = "Coeficiente ± 1.96 × E.E."
-  ) +
-  theme_minimal()
-
-# 3) Gráfico para Distance-to-Default × Shock
-p_dd <- ggplot(dd_coefs, aes(x = horizon, y = beta)) +
-  geom_line(size = 1) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se),
-              alpha = 0.2, fill = "grey70") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    x        = "Horizonte (trimestres)",
-    y        = "Efecto acumulado de inversión",
-    title    = "Dinámica de Respuesta: Distance-to-Default × Shock",
-    subtitle = "Coeficiente ± 1.96 × E.E."
-  ) +
-  theme_minimal()
-
-# 4) Mostrar ambos gráficos uno debajo del otro
-
-# Opción 1: con gridExtra sin print()
-grid.arrange(p_lev, p_dd, ncol = 1)
-
-# Crear nueva “página” gráfica
-grid.newpage()
-# Dibujar ambos plots juntos
-g <- grid.arrange(p_lev, p_dd, ncol = 1)
-grid.draw(g)
-
-
-# Opción 2: si prefieres patchwork, descomenta esto:
-# install.packages("patchwork")
-library(patchwork)
-p_lev / p_dd
-
-
-
-
-# --------------------------------------------------------
-# Figure 6a: Respuestas dinámicas de los pagos de interés (sin embigl, horizonte 0–12)
-# --------------------------------------------------------
-
-# Instalar patchwork si no está instalado
-install.packages("patchwork")
-
-library(haven)       # read_dta()
-library(zoo)         # as.yearqtr()
+library(haven)
+library(zoo)
 library(dplyr)
 library(purrr)
-library(fixest)      # feols()
+library(fixest)
+library(readr)
 library(knitr)
 library(kableExtra)
 library(ggplot2)
-library(patchwork)   # para apilar plots
+library(patchwork)
+library(tidyr)
 
-# 1) Leer datos y convertir dateq a trimestral
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
+# --------------------------------------------------------
+# 1) Leer base de datos y convertir fecha a trimestral
+# --------------------------------------------------------
+ruta_dta <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final/Data_Base_final.dta"
+base_dir <- dirname(ruta_dta)
+
+df <- read_dta(ruta_dta) %>%
   mutate(dateq = as.yearqtr(dateq)) %>%
   arrange(name, dateq)
 
-# 2) Crear/renombrar variable de pagos de interés
+
+# ================================================
+# 4) Preprocesamiento: dlog_capital
+# ================================================
 df <- df %>%
+  arrange(name, dateq) %>%
+  group_by(name) %>%
   mutate(
-    int_exp = oiadpq  # Ajusta si tu variable de pagos de interés tiene otro nombre
+    ratio_cap     = real_capital / lag(real_capital),
+    dlog_capital  = suppressWarnings(ifelse(ratio_cap > 0, log(ratio_cap), NA_real_)),
+    shock = -shock
+  ) %>%
+  select(-ratio_cap) %>%
+  ungroup()
+
+#--------------------------------------------------------
+# Figure 6a: Respuestas dinámicas de los pagos de interés (horizonte 0–12) con controles macro
+# --------------------------------------------------------
+
+# --------------------------------------------------------
+# 2) Crear variable int_exp (pagos de interés) si no existe
+# --------------------------------------------------------
+if (!"int_exp" %in% names(df)) {
+  df <- df %>% mutate(int_exp = oiadpq)
+} else {
+  message("Variable 'int_exp' ya existe; omitiendo creación.")
+}
+
+# --------------------------------------------------------
+# 3) Controles firm-level y choque puro (verificar existencia)
+# --------------------------------------------------------
+if (!"rsales_g_std" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>% arrange(dateq) %>%
+    mutate(rsales_g_std = {
+      x <- log(saleq) - log(lag(saleq))
+      (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
+    }) %>% ungroup()
+} else {
+  message("Variable 'rsales_g_std' ya existe; omitiendo.")
+}
+
+if (!"size_index" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>% arrange(dateq) %>%
+    mutate(size_index = {
+      tmp <- (
+        (log(atq) - mean(log(atq), na.rm=TRUE)) / sd(log(atq), na.rm=TRUE) +
+          (saleq - mean(saleq, na.rm=TRUE)) / sd(saleq, na.rm=TRUE)
+      ) / 2
+      (tmp - mean(tmp, na.rm=TRUE)) / sd(tmp, na.rm=TRUE)
+    }) %>% ungroup()
+} else {
+  message("Variable 'size_index' ya existe; omitiendo.")
+}
+
+if (!"sh_current_a_std" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>% arrange(dateq) %>%
+    mutate(sh_current_a_std = {
+      x <- current_ratio
+      (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
+    }) %>% ungroup()
+} else {
+  message("Variable 'sh_current_a_std' ya existe; omitiendo.")
+}
+
+if (!all(c("lev_std","dd_std") %in% names(df))) {
+  df <- df %>%
+    group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      lev_std = { x <- leverage; (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) },
+      dd_std  = { x <- dd;       (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) }
+    ) %>% ungroup()
+} else {
+  message("Variables 'lev_std' y 'dd_std' ya existen; omitiendo.")
+}
+
+if (!all(c("lev_shock","d2d_shock") %in% names(df))) {
+  df <- df %>% mutate(
+    lev_shock = lev_std * shock,
+    d2d_shock = dd_std  * shock
   )
+} else {
+  message("Variables 'lev_shock' y 'd2d_shock' ya existen; omitiendo.")
+}
 
-# 3) Generar controles firm-level y choques
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    rsales_g_std          = { x <- log(saleq) - log(lag(saleq)); (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    size_std              = { x <- log(atq); (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    sh_current_a_std      = { x <- current_ratio; (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    lev_std               = { x <- leverage; (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    dd_std                = { x <- dd;       (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # Interacción con shock raw (mps)
-    lev_wins_dem_std_wide = lev_std * mps,
-    d2d_wins_dem_std_wide = dd_std  * mps
-  ) %>%
-  ungroup()
-
+# --------------------------------------------------------
 # 4) Construir variables dinámicas cumFh_int_exp para h = 0…12
-df_dyn <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    cumF0_int_exp  = int_exp,
-    cumF1_int_exp  = int_exp + lead(int_exp, 1),
-    cumF2_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2),
-    cumF3_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3),
-    cumF4_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4),
-    cumF5_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5),
-    cumF6_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5) + lead(int_exp, 6),
-    cumF7_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5) + lead(int_exp, 6) + lead(int_exp, 7),
-    cumF8_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5) + lead(int_exp, 6) + lead(int_exp, 7) + lead(int_exp, 8),
-    cumF9_int_exp  = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5) + lead(int_exp, 6) + lead(int_exp, 7) + lead(int_exp, 8) + lead(int_exp, 9),
-    cumF10_int_exp = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5) + lead(int_exp, 6) + lead(int_exp, 7) + lead(int_exp, 8) + lead(int_exp, 9) + lead(int_exp, 10),
-    cumF11_int_exp = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5) + lead(int_exp, 6) + lead(int_exp, 7) + lead(int_exp, 8) + lead(int_exp, 9) + lead(int_exp, 10) + lead(int_exp, 11),
-    cumF12_int_exp = int_exp + lead(int_exp, 1) + lead(int_exp, 2) + lead(int_exp, 3) + lead(int_exp, 4) + lead(int_exp, 5) + lead(int_exp, 6) + lead(int_exp, 7) + lead(int_exp, 8) + lead(int_exp, 9) + lead(int_exp, 10) + lead(int_exp, 11) + lead(int_exp, 12)
-  ) %>%
-  ungroup()
+# --------------------------------------------------------
+dyn_vars <- paste0("cumF", 0:12, "_int_exp")
+if (!all(dyn_vars %in% names(df))) {
+  df_dyn <- df %>% group_by(name) %>% arrange(dateq) %>%
+    group_modify(~ {
+      tmp <- .x
+      for (h in 0:12) {
+        tmp[[paste0("cumF",h,"_int_exp")]] <-
+          rowSums(map_dfc(0:h, ~ lead(tmp$int_exp, .x)), na.rm=TRUE)
+      }
+      tmp
+    }) %>% ungroup()
+} else {
+  message("Variables dinámicas cumFh_int_exp ya existen; omitiendo.")
+  df_dyn <- df
+}
 
-# 5) Definir controles para la regresión (sin embigl)
-controls_firm <- c("rsales_g_std", "size_std", "sh_current_a_std")
 
-# 6) Estimar dinámicas para h = 0…12 (solo coeficiente × choque wide)
+# --------------------------------------------------------
+# 5) Definir controles firm-level y macro (con detección de faltantes)
+# --------------------------------------------------------
+controls_firm  <- c("rsales_g_std", "size_index", "sh_current_a_std")
+controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+
+# Detectar los controles macro efectivamente presentes en df_dyn
+present_macro <- intersect(controls_macro, names(df_dyn))
+if (length(present_macro) < length(controls_macro)) {
+  missing_macro <- setdiff(controls_macro, present_macro)
+  warning(
+    "Faltan controles macro: ",
+    paste(missing_macro, collapse = ", "),
+    ". Se omitirán en la estimación."
+  )
+}
+
+# Construir la cadena de controles sólo con los existentes
+all_controls <- paste(c(controls_firm, present_macro), collapse = " + ")
+
+# --------------------------------------------------------
+# 6) Estimar dinámicas para h = 0…12 (solo coeficiente × choque puro)
+# --------------------------------------------------------
+library(purrr)
+library(fixest)
+
 res_IR_lev <- map(0:12, function(h) {
-  form <- as.formula(paste0(
-    "cumF", h, "_int_exp ~ lev_wins_dem_std_wide + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
+  fml <- as.formula(paste0(
+    "cumF", h, "_int_exp ~ lev_shock + ", all_controls,
+    " | name + Country"
   ))
-  feols(form, data = df_dyn, cluster = ~name + Country_x)
+  feols(fml, data = df_dyn, cluster = ~ name + Country)
 })
 
 res_IR_dd <- map(0:12, function(h) {
-  form <- as.formula(paste0(
-    "cumF", h, "_int_exp ~ d2d_wins_dem_std_wide + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
+  fml <- as.formula(paste0(
+    "cumF", h, "_int_exp ~ d2d_shock + ", all_controls,
+    " | name + Country"
   ))
-  feols(form, data = df_dyn, cluster = ~name + Country_x)
+  feols(fml, data = df_dyn, cluster = ~ name + Country)
 })
 
-# 7) Extraer coeficientes y errores
+# --------------------------------------------------------
+# 7) Extraer coeficientes y errores estándar
+# --------------------------------------------------------
+library(dplyr)
+
 IR_lev <- tibble(
   horizon = 0:12,
-  beta_lev = map_dbl(res_IR_lev, ~ coef(.x)["lev_wins_dem_std_wide"]),
-  se_lev   = map_dbl(res_IR_lev, ~ sqrt(vcov(.x)["lev_wins_dem_std_wide", "lev_wins_dem_std_wide"]))
+  beta_lev = map_dbl(res_IR_lev, ~ coef(.x)["lev_shock"]),
+  se_lev   = map_dbl(res_IR_lev, ~ sqrt(vcov(.x)["lev_shock", "lev_shock"]))
 )
 
 IR_dd <- tibble(
   horizon = 0:12,
-  beta_dd  = map_dbl(res_IR_dd, ~ coef(.x)["d2d_wins_dem_std_wide"]),
-  se_dd    = map_dbl(res_IR_dd, ~ sqrt(vcov(.x)["d2d_wins_dem_std_wide", "d2d_wins_dem_std_wide"]))
+  beta_dd  = map_dbl(res_IR_dd, ~ coef(.x)["d2d_shock"]),
+  se_dd    = map_dbl(res_IR_dd, ~ sqrt(vcov(.x)["d2d_shock", "d2d_shock"]))
 )
 
-# 8) Combinar y presentar en tabla con kableExtra
+# --------------------------------------------------------
+# 8) Combinar resultados y presentar tabla con kableExtra
+# --------------------------------------------------------
+library(kableExtra)
+library(knitr)
+
 table_IR <- IR_lev %>%
   left_join(IR_dd, by = "horizon") %>%
   mutate(
@@ -336,41 +210,28 @@ table_IR %>%
   ) %>%
   kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
 
+
+
+# --------------------------------------------------------
 # 9) Crear gráficos con ggplot2 y apilarlos usando patchwork
-
-p_lev <- ggplot(IR_lev, aes(x = horizon, y = beta_lev)) +
-  geom_line(size = 0.8) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta_lev - 1.96 * se_lev,
-                  ymax = beta_lev + 1.96 * se_lev),
-              alpha = 0.2, fill = "grey70") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Dinámica IR: Leverage × Shock",
-    x     = "Horizonte (trimestres)",
-    y     = "Δ pagos de interés acumulados"
-  ) +
+# --------------------------------------------------------
+p_lev <- ggplot(IR_lev, aes(x=horizon, y=beta_lev)) +
+  geom_line(size=0.8, color="steelblue") +
+  geom_point(size=2, color="steelblue") +
+  geom_ribbon(aes(ymin=beta_lev-1.96*se_lev, ymax=beta_lev+1.96*se_lev), alpha=0.2, fill="steelblue") +
+  scale_x_continuous(breaks=0:12) +
+  labs(title="Dinámica IR: Leverage × Shock", x="Horizonte (trimestres)", y="Δ pagos de interés acumulados") +
   theme_minimal()
 
-p_dd <- ggplot(IR_dd, aes(x = horizon, y = beta_dd)) +
-  geom_line(size = 0.8) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta_dd - 1.96 * se_dd,
-                  ymax = beta_dd + 1.96 * se_dd),
-              alpha = 0.2, fill = "grey70") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Dinámica IR: Distance-to-Default × Shock",
-    x     = "Horizonte (trimestres)",
-    y     = "Δ pagos de interés acumulados"
-  ) +
+p_dd <- ggplot(IR_dd, aes(x=horizon, y=beta_dd)) +
+  geom_line(size=0.8, color="steelblue") +
+  geom_point(size=2, color="steelblue") +
+  geom_ribbon(aes(ymin=beta_dd-1.96*se_dd, ymax=beta_dd+1.96*se_dd), alpha=0.2, fill="steelblue") +
+  scale_x_continuous(breaks=0:12) +
+  labs(title="Dinámica IR: Distance-to-Default × Shock", x="Horizonte (trimestres)", y="Δ pagos de interés acumulados") +
   theme_minimal()
 
-# 10) Apilar y mostrar los dos gráficos con patchwork
-(p_lev / p_dd) +
-  plot_annotation(
-    title = "Figure 6a: Respuestas dinámicas de pagos de interés (horizonte 0–12)"
-  )
+(p_lev / p_dd) + plot_annotation(title="Figure 6a: Respuestas dinámicas de pagos de interés (horizonte 0–12)")
 
 
 
@@ -379,169 +240,68 @@ p_dd <- ggplot(IR_dd, aes(x = horizon, y = beta_dd)) +
 
 
 # --------------------------------------------------------
-# Figure X: Dinámica de Respuesta de Inversión (Δ log k) ante Choques Monetarios
+# Figure 6b: Respuestas dinámicas del proxy de financiamiento externo (horizonte 0–12)
 # --------------------------------------------------------
 
-# --------------------------------------------------------------------------------
-# 0) Instalar paquetes necesarios (si no están)
-# --------------------------------------------------------------------------------
-install.packages("patchwork")   # Para apilar los gráficos
+# Crear proxy financ_ext_proxy si no existe
+if(!"new_debt"%in%names(df)){
+  df<-df%>% group_by(name)%>%arrange(dateq)%>%
+    mutate(new_debt=dlcq+dlttq)
+} else message("Variable 'new_debt' ya existe; omitiendo.")
+if(!"delta_new_debt"%in%names(df)){
+  df<-df%>% group_by(name)%>%arrange(dateq)%>%
+    mutate(delta_new_debt=new_debt-lag(new_debt))
+} else message("Variable 'delta_new_debt' ya existe; omitiendo.")
+if(!"financ_ext_proxy"%in%names(df)){
+  df<-df%>% mutate(financ_ext_proxy=delta_new_debt/atq)
+} else message("Variable 'financ_ext_proxy' ya existe; omitiendo.")
 
-# --------------------------------------------------------------------------------
-# 1) Cargar librerías
-# --------------------------------------------------------------------------------
-library(haven)       # read_dta()
-library(zoo)         # as.yearqtr()
-library(dplyr)       # manipulaciones
-library(purrr)       # map()
-library(fixest)      # feols()
-library(ggplot2)     # para graficar
-library(patchwork)   # para apilar plots
+# Dinámicas proxy financiamiento externo
+dyn_vars_fe<-paste0("cumF",0:12,"_financ_ext")
+if(!all(dyn_vars_fe%in%names(df))){
+  df_dyn_fe<-df%>%group_by(name)%>%arrange(dateq)%>%
+    group_modify(~{tmp<-.x; for(h in 0:12) tmp[[paste0("cumF",h,"_financ_ext")]]<-
+        rowSums(map_dfc(0:h,~lead(tmp$financ_ext_proxy,.x)),na.rm=TRUE); tmp})%>%ungroup()
+} else {message("Variables dinámicas cumFh_financ_ext ya existen; omitiendo."); df_dyn_fe<-df}
 
-# --------------------------------------------------------------------------------
-# 2) Leer datos y preparar variables básicas
-# --------------------------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq = as.yearqtr(dateq)
-  ) %>%
-  arrange(name, dateq)
+# Estimar 6b: financiamiento externo
+res_FE_lev<-map(0:12,function(h){feols(as.formula(paste0(
+  "cumF",h,"_financ_ext~lev_shock+",all_controls,
+  "|name+Country")),data=df_dyn_fe,cluster=~name+Country)})
+res_FE_dd<-map(0:12,function(h){feols(as.formula(paste0(
+  "cumF",h,"_financ_ext~d2d_shock+",all_controls,
+  "|name+Country")),data=df_dyn_fe,cluster=~name+Country)})
+FE_lev_coefs<-tibble(horizon=0:12,beta_lev=map_dbl(res_FE_lev,~coef(.x)["lev_shock"]),
+                     se_lev=map_dbl(res_FE_lev,~sqrt(vcov(.x)["lev_shock","lev_shock"])))
+FE_dd_coefs<-tibble(horizon=0:12,beta_dd=map_dbl(res_FE_dd,~coef(.x)["d2d_shock"]),
+                    se_dd=map_dbl(res_FE_dd,~sqrt(vcov(.x)["d2d_shock","d2d_shock"])))
 
-# Calcular Δ log capital (Δ log k) si no existe:
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    dlog_capital = log(capital) - log(lag(capital))  # Ajusta “capital” al nombre real de tu variable de capital
-  ) %>%
-  ungroup()
+# Guardar resultados CSV
+write_csv(FE_lev_coefs,file.path(base_dir,"dynamics_FE_lev_0_12.csv"))
+write_csv(FE_dd_coefs,file.path(base_dir,"dynamics_FE_dd_0_12.csv"))
 
-# --------------------------------------------------------------------------------
-# 3) Generar controles firm-level y choques estandarizados
-# --------------------------------------------------------------------------------
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # Crecimiento de ventas y estandarizado
-    rsales_g_std      = { x <- log(saleq) - log(lag(saleq)); (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # Tamaño
-    size_std          = { x <- log(atq); (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # Liquidez
-    sh_current_a_std  = { x <- current_ratio; (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # Leverage estándar
-    lev_std           = { x <- leverage; (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # DD estándar
-    dd_std            = { x <- dd;       (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # Choques raw (mps)
-    lev_wins_dem_std_wide = lev_std * mps,
-    d2d_wins_dem_std_wide = dd_std  * mps
-  ) %>%
-  ungroup()
+# Table for 6b
+table_FE<-FE_lev_coefs%>%left_join(FE_dd_coefs,by="horizon")%>%
+  mutate(Leverage=sprintf("%.3f (%.3f)",beta_lev,se_lev),
+         `Dist-to-Default`=sprintf("%.3f (%.3f)",beta_dd,se_dd))%>%
+  select(Horizon=horizon,Leverage,`Dist-to-Default`)
 
-# --------------------------------------------------------------------------------
-# 4) Construir variables dinámicas cumFh para Δ log capital, h = 0…12
-# --------------------------------------------------------------------------------
-df_dyn <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  do({
-    tmp <- .
-    for (h in 0:12) {
-      # suma acumulada de dlog_capital desde t hasta t+h
-      tmp[[paste0("cumF", h, "_dlog_capital")]] <-
-        rowSums(
-          map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
-          na.rm = TRUE
-        )
-    }
-    tmp
-  }) %>%
-  ungroup()
+table_FE%>%kable(caption="Figure 6b: Respuestas dinámicas del proxy de financiamiento externo (horizonte 0–12)",
+                 align=c("c","c","c"))%>%kable_styling(full_width=FALSE,bootstrap_options=c("striped","hover"))
 
-# --------------------------------------------------------------------------------
-# 5) Definir controles para las regresiones (sin embigl)
-# --------------------------------------------------------------------------------
-controls_firm <- c("rsales_g_std", "size_std", "sh_current_a_std")
-
-# --------------------------------------------------------------------------------
-# 6) Estimar regresiones dinámicas para h = 0…12
-#    (a) Leverage × Shock
-#    (b) Distance‐to‐Default × Shock
-# --------------------------------------------------------------------------------
-res_lev <- map(0:12, function(h) {
-  form <- as.formula(paste0(
-    "cumF", h, "_dlog_capital ~ lev_wins_dem_std_wide + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(form, data = df_dyn, cluster = ~name + Country_x)
-})
-
-res_dd <- map(0:12, function(h) {
-  form <- as.formula(paste0(
-    "cumF", h, "_dlog_capital ~ d2d_wins_dem_std_wide + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(form, data = df_dyn, cluster = ~name + Country_x)
-})
-
-# --------------------------------------------------------------------------------
-# 7) Extraer coeficientes y errores
-# --------------------------------------------------------------------------------
-lev_coefs <- tibble(
-  horizon = 0:12,
-  beta     = map_dbl(res_lev, ~ coef(.x)["lev_wins_dem_std_wide"]),
-  se       = map_dbl(res_lev, ~ sqrt(vcov(.x)["lev_wins_dem_std_wide", "lev_wins_dem_std_wide"]))
-)
-
-dd_coefs <- tibble(
-  horizon = 0:12,
-  beta     = map_dbl(res_dd, ~ coef(.x)["d2d_wins_dem_std_wide"]),
-  se       = map_dbl(res_dd, ~ sqrt(vcov(.x)["d2d_wins_dem_std_wide", "d2d_wins_dem_std_wide"]))
-)
-
-# (Opcional) Guardar resultados
-write.csv(lev_coefs, file.path(base_dir, "dynamics_invcap_lev_0_12.csv"), row.names = FALSE)
-write.csv(dd_coefs,  file.path(base_dir, "dynamics_invcap_dd_0_12.csv"),  row.names = FALSE)
-
-# --------------------------------------------------------------------------------
-# 8) Crear gráficos con ggplot2 y apilarlos con patchwork
-# --------------------------------------------------------------------------------
-p_lev_invcap <- ggplot(lev_coefs, aes(x = horizon, y = beta)) +
-  geom_line(size = 0.8) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se),
-              alpha = 0.2, fill = "grey70") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Dinámica IR: Leverage × Shock",
-    x     = "Horizonte (trimestres)",
-    y     = "Δ inversión acumulada (Δ log k)"
-  ) +
+# Gráficos 6b: financiamiento externo
+p_FE_lev<-ggplot(FE_lev_coefs,aes(x=horizon,y=beta_lev))+geom_line(size=0.8,color="steelblue")+
+  geom_point(size=2,color="steelblue")+geom_ribbon(aes(ymin=beta_lev-1.96*se_lev,ymax=beta_lev+1.96*se_lev),
+                                                   alpha=0.2,fill="steelblue")+scale_x_continuous(breaks=0:12)+
+  labs(title="Dinámica FE: Leverage × Shock",x="Horizonte (trimestres)",y="Δ Financiamiento Externo Acumulado")+
   theme_minimal()
+p_FE_dd<-ggplot(FE_dd_coefs,aes(x=horizon,y=beta_dd))+geom_line(size=0.8,color="steelblue")+
+  geom_point(size=2,color="steelblue")+geom_ribbon(aes(ymin=beta_dd-1.96*se_dd,ymax=beta_dd+1.96*se_dd),
+                                                   alpha=0.2,fill="steelblue")+scale_x_continuous(breaks=0:12)+
+  labs(title="Dinámica FE: Distance-to-Default × Shock",x="Horizonte (trimestres)",
+       y="Δ Financiamiento Externo Acumulado")+theme_minimal()
 
-p_dd_invcap <- ggplot(dd_coefs, aes(x = horizon, y = beta)) +
-  geom_line(size = 0.8) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se),
-              alpha = 0.2, fill = "grey70") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Dinámica IR: DD × Shock",
-    x     = "Horizonte (trimestres)",
-    y     = "Δ inversión acumulada (Δ log k)"
-  ) +
-  theme_minimal()
-
-# 9) Apilar y mostrar ambos gráficos con patchwork
-(p_lev_invcap / p_dd_invcap) +
-  plot_annotation(
-    title = "Figure X: Respuesta Dinámica de la Inversión (Δ log k) ante Choques Monetarios (horizonte 0–12)"
-  )
-
+p_FE_lev/p_FE_dd
 
 
 
@@ -550,2481 +310,1613 @@ p_dd_invcap <- ggplot(dd_coefs, aes(x = horizon, y = beta)) +
 # Figure 9: Dynamics, Not Controlling for Differences in Cyclical Sensitivities (horizonte 0–12)
 # --------------------------------------------------------
 
-# Instalar patchwork si no está instalado
-install.packages("patchwork")
+# 2) Generar controles firm-level, estandarizar condiciones financieras y definir choque puro
+if (!"rsales_g_std" %in% names(df)) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(rsales_g_std = { x <- log(saleq) - log(lag(saleq));
+    (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) }) %>% ungroup()
+} else message("Variable 'rsales_g_std' ya existe; omitiendo.")
 
-library(haven)       # read_dta()
-library(zoo)         # as.yearqtr()
-library(dplyr)       # manipulaciones
-library(purrr)       # map()
-library(fixest)      # feols()
-library(ggplot2)     # para graficar
-library(patchwork)   # apilar plots
+if (!"size_index" %in% names(df)) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(size_index = { x <- log(atq);
+    (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) }) %>% ungroup()
+} else message("Variable 'size_index' ya existe; omitiendo.")
 
-# 1) Leer panel y convertir dateq a trimestral
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(dateq = as.yearqtr(dateq)) %>%
-  arrange(name, dateq)
+if (!"sh_current_a_std" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq) %>%
+    mutate(
+      sh_current_a_std = {
+        x <- current_ratio
+        (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+      }
+    ) %>%
+    ungroup()
+} else {
+  message("Variable 'sh_current_a_std' ya existe; omitiendo.")
+}
 
-# 2) Asegurar que existen las interacciones y controles firm-level
-#    (Si ya fueron creadas antes, puedes omitir esta sección)
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # Controles firm-level
-    rsales_g_std          = { x <- log(saleq) - log(lag(saleq)); (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    size_std              = { x <- log(atq); (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    sh_current_a_std      = { x <- current_ratio; (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # Estandarizar leverage y dd
-    lev_std               = { x <- leverage; (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    dd_std                = { x <- dd;       (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE) },
-    # Interacciones con choque raw (mps)
-    lev_wins_dem_std_wide = lev_std * mps,
-    lev_wins_dem_std      = lev_std * mps,   # si quieres incluir raw
-    d2d_wins_dem_std_wide = dd_std  * mps,
-    d2d_wins_dem_std      = dd_std  * mps
-  ) %>%
-  ungroup()
+
+if (!all(c("lev_std","dd_std") %in% names(df))) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      lev_std = { x <- leverage; (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) },
+      dd_std  = { x <- dd;       (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) }
+    ) %>% ungroup()
+} else message("Variables 'lev_std' y 'dd_std' ya existen; omitiendo.")
+
+if (!all(c("lev_shock","d2d_shock") %in% names(df))) {
+  df <- df %>% mutate(
+    lev_shock = lev_std * shock,
+    d2d_shock = dd_std  * shock
+  )
+} else message("Variables 'lev_shock' y 'd2d_shock' ya existen; omitiendo.")
 
 # 3) Construir cumFh_dlog_capital para h = 0…12
-df_dyn <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  do({
-    tmp <- .
-    for (h in 0:12) {
-      tmp[[paste0("cumF", h, "_dlog_capital")]] <-
-        rowSums(
-          map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
-          na.rm = TRUE
-        )
-    }
-    tmp
-  }) %>%
-  ungroup()
+vars_cap <- paste0("cumF", 0:12, "_dlog_capital")
+if (!all(vars_cap %in% names(df))) {
+  df_dyn_nocy <- df %>% group_by(name) %>% arrange(dateq) %>%
+    group_modify(~{
+      tmp <- .x
+      for (h in 0:12) {
+        tmp[[paste0("cumF",h,"_dlog_capital")]] <-
+          rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm=TRUE)
+      }
+      tmp
+    }) %>% ungroup()
+} else {
+  message("Variables dinámicas cumFh_dlog_capital ya existen; omitiendo.")
+  df_dyn_nocy <- df
+}
 
-# 4) Definir controles de firma (sin embigl)
-controls_firm <- c("rsales_g_std", "size_std", "sh_current_a_std")
 
-# 5) Estimar dinámicas h = 0…12
+# --------------------------------------------------------
+# 4) Definir controles firm-level y macro (contemporáneos)
+# --------------------------------------------------------
+controls_firm  <- c("rsales_g_std", "size_index", "sh_current_a_std")
+controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
 
-# (a) Leverage × Shock (no incluye componante ciclo)
+# Detectar cuáles de los controles macro realmente existen en df_dyn_nocy
+present_macro <- intersect(controls_macro, names(df_dyn_nocy))
+if (length(present_macro) < length(controls_macro)) {
+  warning(
+    "Faltan controles macro: ",
+    paste(setdiff(controls_macro, present_macro), collapse = ", "),
+    ". Se omitirán."
+  )
+}
+
+# Construir la cadena de controles sólo con los firm-level y los macro presentes
+all_controls_nocy <- paste(c(controls_firm, present_macro), collapse = " + ")
+
+# --------------------------------------------------------
+# 5) Estimar dinámicas para h = 0…12 sin componente cíclico
+# --------------------------------------------------------
+library(purrr)
+library(fixest)
+
+# (a) Leverage × shock
 res_lev_nocy <- map(0:12, function(h) {
-  feols(
-    as.formula(paste0(
-      "cumF", h, "_dlog_capital ~ ",
-      "lev_wins_dem_std_wide + lev_wins_dem_std + ",
-      paste(controls_firm, collapse = " + "),
-      " | name + Country_x"
-    )),
-    data    = df_dyn,
-    cluster = ~name + Country_x
-  )
+  fml <- as.formula(paste0(
+    "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls_nocy,
+    " | name + Country"
+  ))
+  feols(fml,
+        data    = df_dyn_nocy,
+        cluster = ~ name + Country)
 })
 
-# (b) Distance‐to‐Default × Shock (no incluye componante ciclo)
+# (b) Distance-to-default × shock
 res_dd_nocy <- map(0:12, function(h) {
-  feols(
-    as.formula(paste0(
-      "cumF", h, "_dlog_capital ~ ",
-      "d2d_wins_dem_std_wide + d2d_wins_dem_std + ",
-      paste(controls_firm, collapse = " + "),
-      " | name + Country_x"
-    )),
-    data    = df_dyn,
-    cluster = ~name + Country_x
-  )
+  fml <- as.formula(paste0(
+    "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls_nocy,
+    " | name + Country"
+  ))
+  feols(fml,
+        data    = df_dyn_nocy,
+        cluster = ~ name + Country)
 })
 
-# 6) Extraer coeficientes y errores
-dyn_lev_nocy <- tibble(
-  horizon = 0:12,
-  beta     = map_dbl(res_lev_nocy, ~ coef(.x)["lev_wins_dem_std_wide"]),
-  se       = map_dbl(res_lev_nocy, ~ sqrt(vcov(.x)["lev_wins_dem_std_wide", "lev_wins_dem_std_wide"]))
-)
 
-dyn_dd_nocy <- tibble(
-  horizon = 0:12,
-  beta     = map_dbl(res_dd_nocy, ~ coef(.x)["d2d_wins_dem_std_wide"]),
-  se       = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_wins_dem_std_wide", "d2d_wins_dem_std_wide"]))
-)
 
-# 7) Guardar resultados (opcional)
-write.csv(dyn_lev_nocy, file.path(base_dir, "dynamics_lev_nocyclicalsensitivities.csv"), row.names = FALSE)
-write.csv(dyn_dd_nocy,  file.path(base_dir, "dynamics_dd_nocyclicalsensitivities.csv"),  row.names = FALSE)
+# 6) Extraer coeficientes y errores estándar
+if (!exists("dyn_lev_nocy")) {
+  dyn_lev_nocy <- tibble(
+    horizon = 0:12,
+    beta     = map_dbl(res_lev_nocy, ~ coef(.x)["lev_shock"]),
+    se       = map_dbl(res_lev_nocy, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
+  )
+} else message("Objeto 'dyn_lev_nocy' ya existe; omitiendo extracción.")
 
-# 8) Graficar (horizonte 0–12)
+if (!exists("dyn_dd_nocy")) {
+  dyn_dd_nocy <- tibble(
+    horizon = 0:12,
+    beta     = map_dbl(res_dd_nocy, ~ coef(.x)["d2d_shock"]),
+    se       = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
+  )
+} else message("Objeto 'dyn_dd_nocy' ya existe; omitiendo extracción.")
 
+# 7) Graficar (horizonte 0–12)
 p_nocy_lev <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
-  geom_line(size = 1) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se), alpha = 0.2, fill = "grey70") +
+  geom_line(size = 1, color = "steelblue") +
+  geom_point(size = 2, color = "steelblue") +
+  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se),
+              alpha = 0.2, fill = "steelblue") +
   scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Figure 9(a): Dynamics (No Cyclical Sens.) – Leverage × Shock",
     x     = "Horizonte (trimestres)",
     y     = "Efecto acumulado de inversión"
-  ) +
-  theme_minimal()
+  ) + theme_minimal()
 
 p_nocy_dd <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
-  geom_line(size = 1) +
-  geom_point(size = 2) +
-  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se), alpha = 0.2, fill = "grey70") +
+  geom_line(size = 1, color = "steelblue") +
+  geom_point(size = 2, color = "steelblue") +
+  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se),
+              alpha = 0.2, fill = "steelblue") +
   scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Figure 9(b): Dynamics (No Cyclical Sens.) – DD × Shock",
     x     = "Horizonte (trimestres)",
     y     = "Efecto acumulado de inversión"
-  ) +
-  theme_minimal()
+  ) + theme_minimal()
 
-# 9) Mostrar con patchwork
-p_nocy_lev / p_nocy_dd +
+(p_nocy_lev / p_nocy_dd) +
   plot_annotation(
     title = "Figure 9: Dynamics (No Cyclical Sensitivities) (horizonte 0–12)"
   )
 
 
 
+# ------------------------------------------------------------
+# Figura 10: Respuesta Promedio de Inversión al Shock Monetario (horizonte 0–12)
+# ------------------------------------------------------------
 
+# (2) Preprocesar y estandarizar variables firm-level y financieras
+# ——————————————————————————————————————————————————————————————————
 
-library(haven); library(zoo); library(dplyr); library(purrr)
+# 2.1) Crecimiento de ventas
+if (!"rsales_g" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq) %>%
+    mutate(rsales_g = log(saleq) - log(lag(saleq))) %>%
+    ungroup()
+} else message("Variable 'rsales_g' ya existe; omitiendo creación.")
+
+if (!"rsales_g_std" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq) %>%
+    mutate(
+      rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) /
+        sd(rsales_g, na.rm = TRUE)
+    ) %>%
+    ungroup()
+} else message("Variable 'rsales_g_std' ya existe; omitiendo creación.")
+
+# 2.2) Tamaño (log activos)
+if (!"size_index" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq) %>%
+    mutate(
+      size_index = (log(atq) - mean(log(atq), na.rm = TRUE)) /
+        sd(log(atq), na.rm = TRUE)
+    ) %>%
+    ungroup()
+} else message("Variable 'size_index' ya existe; omitiendo creación.")
+
+# 2.3) Liquidez corriente
+if (!"sh_current_a_std" %in% names(df)) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq) %>%
+    mutate(
+      sh_current_a_std = (current_ratio - mean(current_ratio, na.rm = TRUE)) /
+        sd(current_ratio, na.rm = TRUE)
+    ) %>%
+    ungroup()
+} else message("Variable 'sh_current_a_std' ya existe; omitiendo creación.")
+
+# 2.4) Apalancamiento y distance-to-default
+if (!all(c("lev_std","dd_std") %in% names(df))) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq) %>%
+    mutate(
+      lev_std = (leverage - mean(leverage, na.rm = TRUE)) /
+        sd(leverage, na.rm = TRUE),
+      dd_std  = (dd        - mean(dd,        na.rm = TRUE)) /
+        sd(dd,        na.rm = TRUE)
+    ) %>%
+    ungroup()
+} else message("Variables 'lev_std' y 'dd_std' ya existen; omitiendo creación.")
+
+# 2.5) Interacciones con el shock puro
+if (!all(c("lev_shock","d2d_shock") %in% names(df))) {
+  df <- df %>%
+    mutate(
+      lev_shock = lev_std * shock,
+      d2d_shock = dd_std  * shock
+    )
+} else message("Variables 'lev_shock' y 'd2d_shock' ya existen; omitiendo creación.")
+
+# (3) Construir variables dinámicas cumFh_dlog_capital para h = 0…12
+# ——————————————————————————————————————————————————————————————————
+vars_cap <- paste0("cumF", 0:12, "_dlog_capital")
+if (!all(vars_cap %in% names(df))) {
+  df_dyn <- df %>%
+    group_by(name) %>%
+    arrange(dateq) %>%
+    group_modify(~{
+      tmp <- .x
+      for (h in 0:12) {
+        tmp[[ paste0("cumF",h,"_dlog_capital") ]] <-
+          rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
+      }
+      tmp
+    }) %>%
+    ungroup()
+} else {
+  message("Variables dinámicas cumFh_dlog_capital ya existen; omitiendo creación.")
+  df_dyn <- df
+}
+
+# --------------------------------------------------------
+# 4) Definir controles firm-level y macro (contemporáneos)
+# --------------------------------------------------------
+controls_firm  <- c("rsales_g_std", "size_index", "sh_current_a_std")
+controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+
+# Solo conservamos los macro que realmente existen en df_dyn
+present_macro <- intersect(controls_macro, names(df_dyn))
+if (length(present_macro) < length(controls_macro)) {
+  warning(
+    "Faltan controles macro: ",
+    paste(setdiff(controls_macro, present_macro), collapse = ", "),
+    ". Se omitirán en la estimación."
+  )
+}
+
+# Construimos all_controls con firm-level + los macro presentes
+all_controls <- paste(c(controls_firm, present_macro), collapse = " + ")
+
+# --------------------------------------------------------
+# 5) Estimar dinámica de respuesta promedio al shock (horizonte 0–12)
+# --------------------------------------------------------
+library(purrr)
 library(fixest)
 
-# Ruta del .dta
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),               # convierte a yearqtr
-    quarter = as.factor(dateq)                  # factor trimestre
-  ) %>%
-  arrange(gvkey, dateq)
-
-# 1) Generar dlog_capital
-df <- df %>%
-  group_by(gvkey) %>%
-  mutate(
-    dlog_capital = log(capital) - log(lag(capital))
-  ) %>%
-  ungroup()
-
-# 2) Generar balances firm‐level y estandarizarlos (artefactos similares a tu script)
-df <- df %>%
-  group_by(gvkey) %>%
-  arrange(dateq) %>%
-  mutate(
-    # Crecimiento de ventas:
-    rsales_g     = log(saleq) - log(lag(saleq)),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    # Tamaño:
-    size_std     = (log(atq) - mean(log(atq), na.rm = TRUE)) / sd(log(atq), na.rm = TRUE),
-    # Liquidez:
-    sh_current_a_std = (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE),
-    # Leverage estandarizado y demeaned:
-    lev_std = (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-    # Distance‐to‐default estandarizado y demeaned:
-    dd_std  = (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE)
-  ) %>%
-  ungroup()
-
-# 3) Suponiendo que ya tienes mps (raw shock) y mpso (ortogonalizado),
-#    los renombramos para facilitar (wide=mps_ortho)
-df <- df %>%
-  rename(
-    wide = mpso    # "wide" = shock ortogonalizado (mpso)
-    # y asumimos “mps” existe ya en df
-  )
-
-# 4) Crear las interacciones: 
-df <- df %>%
-  mutate(
-    # Con GDP (horizonte estático, aunque no se usarán aquí)
-    lev_wins_dem_std_gdp  = lev_std * dlog_gdp,
-    d2d_wins_dem_std_gdp  = dd_std  * dlog_gdp,
-    # Con shocks (wide=mpso, mps=raw)
-    lev_wins_dem_std_wide = lev_std * wide,
-    lev_wins_dem_std      = lev_std * mps,
-    d2d_wins_dem_std_wide = dd_std  * wide,
-    d2d_wins_dem_std      = dd_std  * mps
-  )
-
-# 5) Definir controles firm‐level y agregados (igual que en tu script original)
-controls_firm     <- c("rsales_g_std", "size_std", "sh_current_a_std")
-controls_aggregate <- c(
-  paste0("L", 1:4, "_dlog_gdp"),
-  paste0("L", 1:4, "_dlog_cpi"),
-  paste0("L", 1:4, "_unemp")
-)
-
-# 6) Generar variables dinámicas acumuladas cumF0...cumF20 de dlog_capital
-df_dyn <- df %>%
-  group_by(gvkey) %>%
-  arrange(dateq) %>%
-  do({
-    tmp <- .
-    for (h in 0:20) {
-      tmp[[paste0("cumF", h, "_dlog_capital")]] <-
-        rowSums(
-          map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
-          na.rm = TRUE
-        )
-    }
-    tmp
-  }) %>%
-  ungroup()
-
-
-
-# ------------------------------------------------------------
-# Figura 10: Efecto promedio de inversión ante choque monetario
-# ------------------------------------------------------------
-
-
-# ------------------------------------------------------------
-# Figura 10 (ajustada): Respuesta dinámica de inversión (0–12) usando mps
-# ------------------------------------------------------------
-
-# 0) Cargar librerías necesarias
-# Si hace falta, instala antes con:
-# install.packages(c("haven","zoo","dplyr","purrr","fixest","ggplot2"))
-library(haven)     # Para leer archivos .dta
-library(zoo)       # Para as.yearqtr()
-library(dplyr)     # Para manipulaciones de datos
-library(purrr)     # Para map() y map_dfc()
-library(fixest)    # Para feols()
-library(ggplot2)   # Para graficar
-
-# 1) Leer panel desde .dta y crear variable de trimestre
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),   # convierte a objeto yearqtr
-    quarter = as.factor(dateq)     # factor para trimestre (si hace falta más adelante)
-  ) %>%
-  arrange(name, dateq)             # orden por firma ("name") y fecha
-
-# 2) Preprocesar variables para evitar log(0) / log(NA)
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) Variables auxiliares que ponen en NA cualquier valor ≤ 0
-    capital2 = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    saleq2   = if_else(!is.na(saleq)   & saleq   > 0, saleq,   NA_real_),
-    atq2     = if_else(!is.na(atq)     & atq     > 0, atq,     NA_real_),
-    
-    # 2.2) Calcular logaritmos seguros (log(NA)→NA sin warning)
-    log_capital   = log(capital2),
-    lag_log_capital = lag(log_capital),
-    log_saleq     = log(saleq2),
-    lag_log_saleq   = lag(log_saleq),
-    log_atq       = log(atq2),
-    
-    # 2.3) Calcular diferencias de logaritmos (dlog_capital y rsales_g)
-    dlog_capital = log_capital - lag_log_capital,
-    rsales_g     = log_saleq   - lag_log_saleq
-  ) %>%
-  # 2.4) Estandarizar rsales_g
-  mutate(
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE)
-  ) %>%
-  # 2.5) Estandarizar tamaño (size) usando log_atq
-  mutate(
-    size_std = if_else(
-      !is.na(log_atq),
-      (log_atq - mean(log_atq, na.rm = TRUE)) / sd(log_atq, na.rm = TRUE),
-      NA_real_
-    )
-  ) %>%
-  # 2.6) Estandarizar liquidez (current_ratio)
-  mutate(
-    sh_current_a_std = if_else(
-      !is.na(current_ratio),
-      (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE),
-      NA_real_
-    )
-  ) %>%
-  # 2.7) Estandarizar leverage (lev) y distance‐to‐default (dd)
-  mutate(
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std  = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    )
-  ) %>%
-  ungroup() %>%
-  # 2.8) Eliminar variables auxiliares ya no necesarias
-  select(-capital2, -saleq2, -atq2,
-         -log_capital, -lag_log_capital,
-         -log_saleq, -lag_log_saleq,
-         -log_atq)
-
-# 3) Crear las interacciones necesarias con 'mps' (raw shock)
-df <- df %>%
-  mutate(
-    # 3.1) Interacciones con crecimiento de GDP (parte estática)
-    lev_wins_dem_std_gdp  = lev_std * dlog_gdp,
-    d2d_wins_dem_std_gdp  = dd_std  * dlog_gdp,
-    
-    # 3.2) Interacciones con choque raw (mps):
-    #       'lev_wins_dem_std_mps' = lev_std × mps
-    #       'd2d_wins_dem_std_mps' = dd_std  × mps
-    lev_wins_dem_std_mps  = lev_std * mps,
-    d2d_wins_dem_std_mps  = dd_std  * mps
-  )
-
-# 4) Generar variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-df_dyn <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  do({
-    tmp <- .
-    for (h in 0:12) {
-      tmp[[paste0("cumF", h, "_dlog_capital")]] <-
-        rowSums(
-          map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
-          na.rm = TRUE
-        )
-    }
-    tmp
-  }) %>%
-  ungroup()
-
-# 5) Definir controles firm‐level y de país (solo efectos fijos)
-controls_firm   <- c("rsales_g_std", "size_std", "sh_current_a_std")
-# No hay controles agregados en esta versión: solo FE a nivel firma y país
-
-# 6) Verificar que las columnas existan
-stopifnot(
-  all(paste0("cumF", 0:12, "_dlog_capital") %in% colnames(df_dyn)),
-  all(c(
-    "lev_wins_dem_std_gdp", "d2d_wins_dem_std_gdp",
-    "mps", "lev_wins_dem_std_mps", "d2d_wins_dem_std_mps"
-  ) %in% colnames(df_dyn))
-)
-
-# 7) Estimar los modelos para h = 0…12
-modelo_list <- map(0:12, function(h) {
+res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
-  
-  # Fórmula: 
-  # cumFh_dlog_capital ~ lev_wins_dem_std_gdp + d2d_wins_dem_std_gdp + 
-  #                     mps + lev_wins_dem_std_mps + d2d_wins_dem_std_mps +
-  #                     controles firm + FE(name + country)
   fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "lev_wins_dem_std_gdp + d2d_wins_dem_std_gdp + ",
-    "mps + lev_wins_dem_std_mps + d2d_wins_dem_std_mps + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
+    dep_var,
+    " ~ shock + lev_shock + d2d_shock + ",
+    all_controls,
+    " | name + Country"
   ))
-  
-  feols(
-    fml,
-    data    = df_dyn,
-    cluster = ~dateq + name  # cluster ambas dimensiones
-  )
+  feols(fml,
+        data    = df_dyn,
+        cluster = ~ name + Country)
 })
 
-# Asignar nombres m0…m12
-names(modelo_list) <- paste0("m", 0:12)
 
-# 8) Extraer coeficientes y errores estándar de 'mps' y 'd2d_wins_dem_std_mps'
-coefs_mps <- tibble(
-  horizon   = 0:12,
-  beta_mps  = map_dbl(modelo_list, ~ coef(.x)["mps"]),
-  se_mps    = map_dbl(modelo_list, ~ sqrt(vcov(.x)["mps", "mps"]))
-)
+# (6) Extraer coeficientes y errores estándar para 'shock'
+# ——————————————————————————————————————————————————————————————————
+if (!exists("avg_coefs")) {
+  avg_coefs <- tibble(
+    horizon    = 0:12,
+    beta_shock = map_dbl(res_avg, ~ coef(.x)["shock"]),
+    se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock","shock"]))
+  )
+} else message("Objeto 'avg_coefs' ya existe; omitiendo extracción.")
 
-coefs_dd_mps <- tibble(
-  horizon       = 0:12,
-  beta_dd_mps   = map_dbl(modelo_list, ~ coef(.x)["d2d_wins_dem_std_mps"]),
-  se_dd_mps     = map_dbl(modelo_list, ~ sqrt(vcov(.x)["d2d_wins_dem_std_mps", "d2d_wins_dem_std_mps"]))
-)
-
-# Unir en un solo data.frame final
-tabla_res <- coefs_mps %>%
-  left_join(coefs_dd_mps, by = "horizon")
-
-# 9) Mostrar la tabla en consola
-print(tabla_res)
-
-# 10) Graficar las respuestas dinámicas en R
-
-# Gráfico para coef_mps
-p1 <- ggplot(tabla_res, aes(x = horizon, y = beta_mps)) +
+# (7) Graficar la respuesta promedio al shock
+# ——————————————————————————————————————————————————————————————————
+p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   geom_line(size = 1, color = "steelblue") +
   geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta_mps - 1.96 * se_mps, 
-                  ymax = beta_mps + 1.96 * se_mps),
+  geom_ribbon(aes(ymin = beta_shock - 1.96 * se_shock,
+                  ymax = beta_shock + 1.96 * se_shock),
               alpha = 0.2, fill = "steelblue") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Dinámica de Respuesta: mps (choque raw)",
+    title = "Figura 10: Respuesta Promedio de Inversión al Shock Monetario",
     x     = "Horizonte (trimestres)",
-    y     = "Efecto acumulado de inversión"
+    y     = "Efecto promedio acumulado de inversión"
   ) +
   theme_minimal()
 
-# Gráfico para coef_dd_mps
-p2 <- ggplot(tabla_res, aes(x = horizon, y = beta_dd_mps)) +
-  geom_line(size = 1, color = "firebrick") +
-  geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta_dd_mps - 1.96 * se_dd_mps,
-                  ymax = beta_dd_mps + 1.96 * se_dd_mps),
-              alpha = 0.2, fill = "firebrick") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Dinámica de Respuesta: DD × mps",
-    x     = "Horizonte (trimestres)",
-    y     = "Efecto acumulado de inversión"
-  ) +
-  theme_minimal()
-
-# Mostrar los dos gráficos uno debajo del otro
-print(p1)
-print(p2)
+print(p_avg)
 
 
 
 # ------------------------------------------------------------
-# Figura 11: Dynamics Controlando por Inversión Rezagada (horizonte 0–12)
-# ------------------------------------------------------------
-# ------------------------------------------------------------
-# Figura 11: Dynamics Controlando por Inversión Rezagada (horizonte 0–12)
+# Figura 10 (ajustada): Respuesta dinámica de inversión al Shock Monetario Heterogénea
+# (horizonte 0–12) – sin estimar el efecto promedio
 # ------------------------------------------------------------
 
-# 0) Cargar librerías necesarias
-# Si falta alguna, instala con:
-# install.packages(c("haven","zoo","dplyr","purrr","fixest","ggplot2","tidyr"))
-library(haven)     # Para read_dta()
-library(zoo)       # Para as.yearqtr()
-library(dplyr)     # Para manipulación de datos
-library(tidyr)     # Para replace_na()
-library(purrr)     # Para map() y map_dfc()
-library(fixest)    # Para feols()
-library(ggplot2)   # Para graficar
-
-# ------------------------------------------------------------
-# 1) Leer el panel y crear variable trimestral
-# ------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),    # convierte a yearqtr
-    quarter = as.factor(dateq)      # factor para trimestre (opcional)
-  ) %>%
-  arrange(name, dateq)              # orden por firma ("name") y fecha
-
-# ------------------------------------------------------------
-# 2) Preprocesar variables para evitar log(0)/log(NA) y obtener dlog_capital, etc.
-# ------------------------------------------------------------
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) Crear versiones “limpias” para logaritmos (si ≤0 → NA)
-    capital2 = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    saleq2   = if_else(!is.na(saleq)   & saleq   > 0, saleq,   NA_real_),
-    atq2     = if_else(!is.na(atq)     & atq     > 0, atq,     NA_real_),
-    
-    # 2.2) Calcular logaritmos de las versiones limpias (log(NA)→NA sin warning)
-    log_capital    = log(capital2),
-    lag_log_capital = lag(log_capital),
-    log_saleq      = log(saleq2),
-    lag_log_saleq   = lag(log_saleq),
-    log_atq        = log(atq2),
-    
-    # 2.3) Diferencias de logaritmos: dlog_capital y rsales_g
-    dlog_capital = log_capital - lag_log_capital,
-    rsales_g     = log_saleq   - lag_log_saleq,
-    
-    # 2.4) Lag de dlog_capital para Ldl_capital
-    Ldl_capital = lag(dlog_capital, 1),
-    
-    # 2.5) Estandarizar rsales_g
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    
-    # 2.6) Estandarizar size (log_atq)
-    size_std = if_else(
-      !is.na(log_atq),
-      (log_atq - mean(log_atq, na.rm = TRUE)) / sd(log_atq, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.7) Estandarizar liquidez (current_ratio)
-    sh_current_a_std = if_else(
-      !is.na(current_ratio),
-      (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.8) Estandarizar leverage (lev) y distance‐to‐default (dd)
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    )
-  ) %>%
-  ungroup() %>%
-  # 2.9) Eliminar columnas intermedias que ya no se usan
-  select(-capital2, -saleq2, -atq2,
-         -log_capital, -lag_log_capital,
-         -log_saleq, -lag_log_saleq,
-         -log_atq)
-
-# ------------------------------------------------------------
-# 3) Crear interacciones con mps (raw shock)
-# ------------------------------------------------------------
-df <- df %>%
-  mutate(
-    # 3.1) Interacciones con crecimiento de GDP (estático)
-    lev_wins_dem_std_gdp  = lev_std * dlog_gdp,
-    d2d_wins_dem_std_gdp  = dd_std  * dlog_gdp,
-    
-    # 3.2) Interacciones con mps (raw shock)
-    lev_wins_dem_std_mps  = lev_std * mps,
-    d2d_wins_dem_std_mps  = dd_std  * mps
-  )
-
-# ------------------------------------------------------------
-# 4) Generar variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-# ------------------------------------------------------------
-#    Para evitar problemas con do() y nombres anónimos, usamos un bucle for sobre h = 0…12.
-# ------------------------------------------------------------
-
-# Partimos de df y, dentro de cada h, añadimos la columna cumFh_dlog_capital.
-df_dyn <- df %>% arrange(name, dateq)
-
-for (h in 0:12) {
-  # Nombre de la nueva columna
-  new_col <- paste0("cumF", h, "_dlog_capital")
-  
-  # Dentro de cada grupo “name”, sumar los siguientes h términos de dlog_capital
-  df_dyn <- df_dyn %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
+# 2) Preprocesar y estandarizar variables firm-level y financieras
+if (!"rsales_g" %in% names(df)) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(rsales_g = log(saleq) - log(lag(saleq))) %>% ungroup()
+} else message("Variable 'rsales_g' ya existe; omitiendo.")
+if (!"rsales_g_std" %in% names(df)) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(rsales_g_std = (rsales_g - mean(rsales_g, na.rm=TRUE)) / sd(rsales_g, na.rm=TRUE)) %>% ungroup()
+} else message("Variable 'rsales_g_std' ya existe; omitiendo.")
+if (!"size_index" %in% names(df)) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(size_index = (log(atq) - mean(log(atq), na.rm=TRUE)) / sd(log(atq), na.rm=TRUE)) %>% ungroup()
+} else message("Variable 'size_index' ya existe; omitiendo.")
+if (!"sh_current_a_std" %in% names(df)) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(sh_current_a_std = (current_ratio - mean(current_ratio, na.rm=TRUE)) / sd(current_ratio, na.rm=TRUE)) %>% ungroup()
+} else message("Variable 'sh_current_a_std' ya existe; omitiendo.")
+if (!all(c("lev_std","dd_std") %in% names(df))) {
+  df <- df %>% group_by(name) %>% arrange(dateq) %>%
     mutate(
-      # rowSums(map_dfc(0:h, ~ lead(dlog_capital, .x))) acumula dlog_capital desde t hasta t+h
-      !!new_col := rowSums(
-        map_dfc(0:h, ~ lead(dlog_capital, .x)),
-        na.rm = TRUE
-      )
-    ) %>%
-    ungroup()
+      lev_std = (leverage - mean(leverage, na.rm=TRUE)) / sd(leverage, na.rm=TRUE),
+      dd_std  = (dd        - mean(dd,        na.rm=TRUE)) / sd(dd,        na.rm=TRUE)
+    ) %>% ungroup()
+} else message("Variables 'lev_std' y 'dd_std' ya existen; omitiendo.")
+if (!all(c("lev_shock","d2d_shock") %in% names(df))) {
+  df <- df %>% mutate(
+    lev_shock = lev_std * shock,
+    d2d_shock = dd_std  * shock
+  )
+} else message("Variables 'lev_shock' y 'd2d_shock' ya existen; omitiendo.")
+
+# 3) Construir dinámicas cumFh_dlog_capital para h = 0…12
+vars_cap10 <- paste0("cumF",0:12,"_dlog_capital")
+if (!all(vars_cap10 %in% names(df))) {
+  df_dyn10 <- df %>% group_by(name) %>% arrange(dateq) %>%
+    group_modify(~ { tmp <- .x; for(h in 0:12) tmp[[paste0("cumF",h,"_dlog_capital")]] <-
+        rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm=TRUE); tmp }) %>% ungroup()
+} else { message("Variables dinámicas cumFh_dlog_capital ya existen; omitiendo."); df_dyn10 <- df }
+
+
+# ------------------------------------------------------------
+# 4) Definir controles firm-level y macro (contemporáneos)
+# ------------------------------------------------------------
+controls_firm10  <- c("rsales_g_std", "size_index", "sh_current_a_std")
+controls_macro10 <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+
+# Solo conservamos los controles macro que realmente existen en df_dyn10
+present_macro10 <- intersect(controls_macro10, names(df_dyn10))
+if (length(present_macro10) < length(controls_macro10)) {
+  warning(
+    "Faltan controles macro: ",
+    paste(setdiff(controls_macro10, present_macro10), collapse = ", "),
+    ". Se omitirán."
+  )
 }
 
+# Construimos la cadena de controles con firm-level + los macro presentes
+all_controls10 <- paste(c(controls_firm10, present_macro10), collapse = " + ")
+
 # ------------------------------------------------------------
-# 5) Después de crear las dinámicas, reemplazar NA en regressores por 0
-#    para no eliminar filas enteras en las regresiones.
+# 5) Estimar dinámicas sin componente promedio (horizonte 0–12)
 # ------------------------------------------------------------
-df_dyn <- df_dyn %>%
-  mutate(
-    across(
-      c(
-        rsales_g_std, size_std, sh_current_a_std,
-        Ldl_capital,
-        lev_wins_dem_std_gdp, lev_wins_dem_std_mps,
-        d2d_wins_dem_std_gdp, d2d_wins_dem_std_mps
-      ),
-      ~ replace_na(.x, 0)
-    )
+library(purrr)
+library(fixest)
+
+# (a) Leverage × shock
+res_lev10 <- map(0:12, function(h) {
+  dep <- paste0("cumF", h, "_dlog_capital")
+  fml <- as.formula(paste0(
+    dep, " ~ lev_shock + ", all_controls10,
+    " | name + Country"
+  ))
+  feols(fml,
+        data    = df_dyn10,
+        cluster = ~ name + Country)
+})
+
+# (b) Distance‐to‐default × shock
+res_dd10 <- map(0:12, function(h) {
+  dep <- paste0("cumF", h, "_dlog_capital")
+  fml <- as.formula(paste0(
+    dep, " ~ d2d_shock + ", all_controls10,
+    " | name + Country"
+  ))
+  feols(fml,
+        data    = df_dyn10,
+        cluster = ~ name + Country)
+})
+
+
+
+# 6) Extraer coeficientes y errores
+if (!exists("coef_lev10")) {
+  coef_lev10 <- tibble(
+    horizon = 0:12,
+    beta_lev = map_dbl(res_lev10, ~ coef(.x)["lev_shock"]),
+    se_lev   = map_dbl(res_lev10, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
   )
+} else message("Objeto 'coef_lev10' ya existe; omitiendo.")
+if (!exists("coef_dd10")) {
+  coef_dd10 <- tibble(
+    horizon = 0:12,
+    beta_dd  = map_dbl(res_dd10, ~ coef(.x)["d2d_shock"]),
+    se_dd    = map_dbl(res_dd10, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
+  )
+} else message("Objeto 'coef_dd10' ya existe; omitiendo.")
+
+# 7) Graficar dinámicas (horizonte 0–12)
+p10_lev <- ggplot(coef_lev10, aes(x=horizon, y=beta_lev)) +
+  geom_line(size=1, color="steelblue") + geom_point(size=2, color="steelblue") +
+  geom_ribbon(aes(ymin=beta_lev-1.96*se_lev, ymax=beta_lev+1.96*se_lev), alpha=0.2, fill="steelblue") +
+  scale_x_continuous(breaks=0:12) +
+  labs(title="Dinámica: Leverage × Shock (sin promedio)", x="Horizonte", y="β") + theme_minimal()
+p10_dd <- ggplot(coef_dd10, aes(x=horizon, y=beta_dd)) +
+  geom_line(size=1, color="firebrick") + geom_point(size=2, color="firebrick") +
+  geom_ribbon(aes(ymin=beta_dd-1.96*se_dd, ymax=beta_dd+1.96*se_dd), alpha=0.2, fill="firebrick") +
+  scale_x_continuous(breaks=0:12) +
+  labs(title="Dinámica: DD × Shock (sin promedio)", x="Horizonte", y="β") + theme_minimal()
+
+(p10_lev / p10_dd) +
+  plot_annotation(title = "Figura 10: Dinámica de Inversión sin Componente Promedio (0–12)")
+
+
+
 
 # ------------------------------------------------------------
-# 6) Definir controles firm‐level (solo se usan en el RHS)
-#    y efectos fijos a nivel firma + país (Country_x)
+# Figura 12 (ajustada): Dinámica de Respuestas al Shock Monetario por Tamaño (toda la muestra)
 # ------------------------------------------------------------
-controls_firm <- c("rsales_g_std", "size_std", "sh_current_a_std")
-# Efectos fijos: name (firma) + Country_x (país)
+
+library(dplyr)
+library(purrr)
+library(fixest)
+library(zoo)
+library(ggplot2)
+
+# 1) Partimos de df original
+df_cntl <- df
+
+# 2) Calcular ventas, tamaño, liquidez y apalancamiento estandarizado
+df_cntl <- df_cntl %>%
+  group_by(name) %>%
+  arrange(dateq, .by_group = TRUE) %>%
+  # 2.1) crecimiento de ventas
+  mutate(
+    rsales_g = if (!"rsales_g"   %in% names(.))   log(saleq) - log(lag(saleq)) else rsales_g,
+    rsales_g_std = if (!"rsales_g_std" %in% names(.))
+      (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE)
+    else rsales_g_std,
+    # 2.2) size_index
+    size_index = if (!"size_index" %in% names(.))
+      (log(atq) - mean(log(atq), na.rm = TRUE)) / sd(log(atq), na.rm = TRUE)
+    else size_index,
+    # 2.3) liquidez corriente
+    sh_current_a_std = if (!"sh_current_a_std" %in% names(.))
+      (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE)
+    else sh_current_a_std,
+    # 2.4) apalancamiento y distance-to-default
+    lev_std = if (!"lev_std" %in% names(.))
+      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE)
+    else lev_std,
+    dd_std  = if (!"dd_std"  %in% names(.))
+      (dd        - mean(dd,        na.rm = TRUE)) / sd(dd,        na.rm = TRUE)
+    else dd_std
+  ) %>%
+  ungroup()
+
+# 3) Crear interacciones size × GDP y size × shock
+# — solo si existen dlog_gdp y shock en df_cntl
+if ("dlog_gdp" %in% names(df_cntl)) {
+  df_cntl <- df_cntl %>%
+    mutate(
+      size_gdp   = if (!"size_gdp"   %in% names(.)) size_index * dlog_gdp else size_gdp
+    )
+} else {
+  warning("No existe 'dlog_gdp'; se omite creación de 'size_gdp'.")
+}
+
+if ("shock" %in% names(df_cntl)) {
+  df_cntl <- df_cntl %>%
+    mutate(
+      size_shock = if (!"size_shock" %in% names(.)) size_index * shock else size_shock
+    )
+} else {
+  stop("Falta la variable 'shock' en el data frame.")
+}
+
+# 4) Generar dinámicas acumuladas cumFh_dlog_capital para h = 0…12
+vars_cum <- paste0("cumF", 0:12, "_dlog_capital")
+if (!all(vars_cum %in% names(df_cntl))) {
+  df_dyn12 <- df_cntl %>%
+    group_by(name) %>%
+    arrange(dateq, .by_group = TRUE) %>%
+    group_modify(~{
+      tmp <- .x
+      for (h in 0:12) {
+        tmp[[ paste0("cumF", h, "_dlog_capital") ]] <-
+          rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
+      }
+      tmp
+    }) %>%
+    ungroup()
+} else {
+  message("Variables dinámicas cumFh_dlog_capital ya existen; omitiendo.")
+  df_dyn12 <- df_cntl
+}
+
+# 5) Definir controles firm-level y macro (solo los macro presentes)
+controls_firm  <- c("rsales_g_std", "sh_current_a_std")
+controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+present_macro  <- intersect(controls_macro, names(df_dyn12))
+if (length(present_macro) < length(controls_macro)) {
+  warning("Faltan controles macro: ",
+          paste(setdiff(controls_macro, present_macro), collapse = ", "),
+          ". Se omitirán.")
+}
+all_controls <- c(controls_firm, present_macro) %>% paste(collapse = " + ")
+
 
 # ------------------------------------------------------------
-# 7) Verificar que existan las columnas que necesitamos
+# 6) Estimar efecto heterogéneo size × shock para h = 0…12 (ajustado)
 # ------------------------------------------------------------
-stopifnot(
-  all(paste0("cumF", 0:12, "_dlog_capital") %in% colnames(df_dyn)),
-  all(c(
-    "lev_wins_dem_std_gdp", "lev_wins_dem_std_mps",
-    "d2d_wins_dem_std_gdp", "d2d_wins_dem_std_mps",
-    "Ldl_capital"
-  ) %in% colnames(df_dyn))
-)
+library(purrr)
+library(fixest)
 
-# ------------------------------------------------------------
-# 8) (a) Dinámica para Leverage: bucle h = 0…12
-# ------------------------------------------------------------
-models_lev <- map(0:12, function(h) {
+# Flags de presencia
+has_size_gdp   <- "size_gdp"   %in% names(df_dyn12)
+present_macro  <- intersect(controls_macro, names(df_dyn12))
+
+res_size <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   
-  # Fórmula para Leverage (incluye Ldl_capital):
-  # cumFh_dlog_capital ~ lev_wins_dem_std_gdp + lev_wins_dem_std_mps + Ldl_capital + controles firm
-  # FE a nivel: name + Country_x
-  fml <- as.formula(paste0(
+  # Construir dinámicamente los términos RHS
+  rhs_terms <- c(
+    if (has_size_gdp) "size_gdp",
+    "size_shock",
+    controls_firm,
+    present_macro
+  )
+  
+  fml_str <- paste0(
     dep_var, " ~ ",
-    "lev_wins_dem_std_gdp + lev_wins_dem_std_mps + Ldl_capital + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
+    paste(rhs_terms, collapse = " + "),
+    " | name + Country"
+  )
   
   feols(
-    fml,
-    data    = df_dyn,
-    cluster = ~dateq + name
+    as.formula(fml_str),
+    data    = df_dyn12,
+    cluster = ~ name + Country
   )
 })
 
-names(models_lev) <- paste0("m", 0:12)
+
+# 7) Extraer coeficiente y error estándar de size_shock
+if (!exists("coef_size")) {
+  coef_size <- tibble(
+    horizon    = 0:12,
+    beta_shock = map_dbl(res_size, ~ coef(.x)["size_shock"]),
+    se_shock   = map_dbl(res_size, ~ sqrt(vcov(.x)["size_shock", "size_shock"]))
+  )
+} else {
+  message("Objeto 'coef_size' ya existe; omitiendo extracción.")
+}
+
+# 8) Graficar la dinámica de size_shock
+ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
+  geom_line(size = 1, color = "darkgreen") +
+  geom_point(size = 2, color = "darkgreen") +
+  geom_ribbon(aes(
+    ymin = beta_shock - 1.96 * se_shock,
+    ymax = beta_shock + 1.96 * se_shock
+  ), alpha = 0.2, fill = "darkgreen") +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
+    title = "Figura 12: Dinámica – Size × Shock (toda la muestra)",
+    x     = "Horizonte (trimestres)",
+    y     = "Coeficiente β_h"
+  ) +
+  theme_minimal()
+
+
+
 
 # ------------------------------------------------------------
-# 9) Extraer coeficientes y errores estándar de ‘lev_wins_dem_std_mps’
+# Figura 13 (ajustada): Dinámica Conjunta de Posición Financiera y Tamaño
+# (horizonte 0–12 para toda la muestra)
 # ------------------------------------------------------------
-coefs_lev_mps <- tibble(
+
+# 1) Inicializar df_cntl13 a partir de df (debe tener dateq, name, Country)
+# ------------------------------------------------------------------
+df_cntl13 <- df
+
+# 2) Crear/Verificar series macro: dlog_gdp y dlog_cpi (ajustado)
+# ------------------------------------------------------------------
+# dlog_gdp
+if ("gdp" %in% names(df_cntl13)) {
+  if (!"dlog_gdp" %in% names(df_cntl13)) {
+    df_cntl13 <- df_cntl13 %>%
+      group_by(Country) %>%
+      arrange(dateq, .by_group = TRUE) %>%
+      mutate(
+        dlog_gdp = if_else(
+          !is.na(gdp) & gdp > 0 &
+            !is.na(lag(gdp)) & lag(gdp) > 0,
+          log(gdp) - log(lag(gdp)),
+          NA_real_
+        )
+      ) %>%
+      ungroup()
+  } else {
+    message("Variable 'dlog_gdp' ya existe; omitiendo.")
+  }
+} else {
+  warning("No se encontró 'gdp' en df_cntl13; se omite creación de 'dlog_gdp'.")
+}
+
+# dlog_cpi
+if ("ipc" %in% names(df_cntl13)) {
+  if (!"dlog_cpi" %in% names(df_cntl13)) {
+    df_cntl13 <- df_cntl13 %>%
+      group_by(Country) %>%
+      arrange(dateq, .by_group = TRUE) %>%
+      mutate(
+        dlog_cpi = if_else(
+          !is.na(ipc) & ipc > 0 &
+            !is.na(lag(ipc)) & lag(ipc) > 0,
+          log(ipc) - log(lag(ipc)),
+          NA_real_
+        )
+      ) %>%
+      ungroup()
+  } else {
+    message("Variable 'dlog_cpi' ya existe; omitiendo.")
+  }
+} else {
+  warning("No se encontró 'ipc' en df_cntl13; se omite creación de 'dlog_cpi'.")
+}
+
+
+# 3) Crear proxy size_index_std y condiciones financieras
+# ------------------------------------------------------------------
+if (!"size_index_std" %in% names(df_cntl13)) {
+  df_cntl13 <- df_cntl13 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      log_atq        = log(atq),
+      log_atq_std    = (log_atq - mean(log_atq, na.rm=TRUE))/sd(log_atq, na.rm=TRUE),
+      saleq_std      = (saleq   - mean(saleq,   na.rm=TRUE))/sd(saleq,   na.rm=TRUE),
+      size_index     = (log_atq_std + saleq_std)/2,
+      size_index_std = (size_index - mean(size_index, na.rm=TRUE))/sd(size_index, na.rm=TRUE),
+      lev_std        = (leverage - mean(leverage, na.rm=TRUE))/sd(leverage, na.rm=TRUE),
+      dd_std         = (dd        - mean(dd,        na.rm=TRUE))/sd(dd,        na.rm=TRUE)
+    ) %>%
+    ungroup() %>%
+    select(-log_atq,-log_atq_std,-saleq_std)
+} else message("Variables de tamaño y condiciones financieras ya existen; omitiendo.")
+
+# 4) Crear interacciones
+# ------------------------------------------------------------------
+if (!all(c("size_gdp","size_shock","lev_shock_gdp","lev_shock","d2d_shock_gdp","d2d_shock") %in% names(df_cntl13))) {
+  df_cntl13 <- df_cntl13 %>% mutate(
+    size_gdp      = size_index_std * dlog_gdp,
+    size_shock    = size_index_std * shock,
+    lev_shock_gdp = lev_std          * dlog_gdp,
+    lev_shock     = lev_std          * shock,
+    d2d_shock_gdp = dd_std           * dlog_gdp,
+    d2d_shock     = dd_std           * shock
+  )
+} else message("Interacciones ya existen; omitiendo.")
+
+# 5) Crear dlog_capital y controles adicionales
+# ------------------------------------------------------------------
+if (!"dlog_capital" %in% names(df_cntl13)) {
+  df_cntl13 <- df_cntl13 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      dlog_capital     = log(capital) - log(lag(capital)),
+      rsales_g_std     = {(x<-log(saleq)-log(lag(saleq)));(x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)},
+      sh_current_a_std = {(x<-current_ratio);(x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)}
+    ) %>% ungroup()
+} else message("Control de inversión o liquidez ya existe; omitiendo.")
+
+# 6) Construir dinámicas cumFh_dlog_capital para h=0…12
+# ------------------------------------------------------------------
+vars13 <- paste0("cumF",0:12,"_dlog_capital")
+if (!all(vars13 %in% names(df_cntl13))) {
+  df_dyn13 <- df_cntl13 %>% group_by(name) %>% arrange(dateq) %>%
+    group_modify(~{tmp<-.x;for(h in 0:12) tmp[[paste0("cumF",h,"_dlog_capital")]]<-rowSums(map_dfc(0:h,~lead(tmp$dlog_capital,.x)),na.rm=TRUE);tmp})%>%ungroup()
+} else { message("Variables dinámicas ya existen; omitiendo."); df_dyn13<-df_cntl13 }
+
+
+
+# ------------------------------------------------------------
+# 7.5) Definir controles firm-level y macro (ajustado)
+# ------------------------------------------------------------
+controls_firm13  <- c("rsales_g_std", "sh_current_a_std", "size_index_std")
+controls_macro13 <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+
+present_macro13 <- intersect(controls_macro13, names(df_dyn13))
+if (length(present_macro13) < length(controls_macro13)) {
+  warning(
+    "Faltan controles macro: ",
+    paste(setdiff(controls_macro13, present_macro13), collapse = ", "),
+    ". Se omitirán."
+  )
+}
+
+all_controls13 <- paste(c(controls_firm13, present_macro13), collapse = " + ")
+
+# ------------------------------------------------------------
+# 8a) Estimar dinámica Leverage + Size (ajustado)
+# ------------------------------------------------------------
+res_lev_size <- map(0:12, function(h) {
+  dep_var <- paste0("cumF", h, "_dlog_capital")
+  fml_str <- paste0(
+    dep_var, " ~ size_shock + lev_shock + lev_shock_gdp + ",
+    all_controls13,
+    " | name + Country"
+  )
+  feols(
+    as.formula(fml_str),
+    data    = df_dyn13,
+    cluster = ~ name + Country
+  )
+})
+
+
+
+# 8b) Estimar dinámica DD + Size
+# ------------------------------------------------------------------
+res_dd_size <- map(0:12, ~feols(
+  as.formula(paste0(
+    "cumF",.x,"_dlog_capital ~ size_shock + d2d_shock + d2d_shock_gdp + ",
+    all_controls13," | name + Country"
+  )),data=df_dyn13,cluster=~name+dateq))
+
+# 9) Extraer coeficientes y errores
+# ------------------------------------------------------------------
+lev_size_coefs <- tibble(
   horizon   = 0:12,
-  beta_lev  = map_dbl(models_lev, ~ coef(.x)["lev_wins_dem_std_mps"]),
-  se_lev    = map_dbl(models_lev, ~ sqrt(vcov(.x)["lev_wins_dem_std_mps", "lev_wins_dem_std_mps"]))
+  beta_size = map_dbl(res_lev_size,~coef(.x)["size_shock"]),
+  se_size   = map_dbl(res_lev_size,~sqrt(vcov(.x)["size_shock","size_shock"])),
+  beta_lev  = map_dbl(res_lev_size,~coef(.x)["lev_shock"]),
+  se_lev    = map_dbl(res_lev_size,~sqrt(vcov(.x)["lev_shock","lev_shock"]))
+)
+dd_size_coefs <- tibble(
+  horizon   = 0:12,
+  beta_size = map_dbl(res_dd_size,~coef(.x)["size_shock"]),
+  se_size   = map_dbl(res_dd_size,~sqrt(vcov(.x)["size_shock","size_shock"])),
+  beta_dd   = map_dbl(res_dd_size,~coef(.x)["d2d_shock"]),
+  se_dd     = map_dbl(res_dd_size,~sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
 
-# ------------------------------------------------------------
-# 10) Mostrar tabla de dinámica Leverage
-# ------------------------------------------------------------
-cat("\nTabla 11(a): Dinámica con Leverage (coeficiente de lev_wins_dem_std_mps)\n")
-print(coefs_lev_mps)
+# 10) Guardar resultados opcional
+# ------------------------------------------------------------------
+write_csv(lev_size_coefs, file.path(base_dir,"dynamics_lev_size.csv"))
+write_csv(dd_size_coefs,  file.path(base_dir,"dynamics_dd_size.csv"))
 
-# ------------------------------------------------------------
-# 11) Graficar respuesta dinámica de Leverage
-# ------------------------------------------------------------
-p_lev_dyn <- ggplot(coefs_lev_mps, aes(x = horizon, y = beta_lev)) +
-  geom_line(size = 1, color = "steelblue") +
-  geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta_lev - 1.96 * se_lev,
-                  ymax = beta_lev + 1.96 * se_lev),
+# 11a) Gráfico Size × Shock
+p13a <- ggplot(lev_size_coefs, aes(x = horizon)) +
+  geom_line(aes(y = beta_size), size = 1, color = "steelblue") +
+  geom_ribbon(aes(ymin = beta_size - 1.96 * se_size,
+                  ymax = beta_size + 1.96 * se_size),
               alpha = 0.2, fill = "steelblue") +
-  scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 11(a): Dinámica IR – Leverage × mps (con Ldl_capital)",
+    title = "Figura 13(a): Size × Shock",
     x     = "Horizonte (trimestres)",
-    y     = "Efecto acumulado de inversión"
+    y     = "Coeficiente β_h"
   ) +
+  scale_x_continuous(breaks = 0:12) +
   theme_minimal()
 
-print(p_lev_dyn)
-
-# ------------------------------------------------------------
-# 12) (b) Dinámica para Distance‐to‐Default: bucle h = 0…12
-# ------------------------------------------------------------
-models_dd <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  
-  # Fórmula para DD (incluye Ldl_capital):
-  # cumFh_dlog_capital ~ d2d_wins_dem_std_gdp + d2d_wins_dem_std_mps + Ldl_capital + controles firm
-  # FE a nivel: name + Country_x
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "d2d_wins_dem_std_gdp + d2d_wins_dem_std_mps + Ldl_capital + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  
-  feols(
-    fml,
-    data    = df_dyn,
-    cluster = ~dateq + name
-  )
-})
-
-names(models_dd) <- paste0("m", 0:12)
-
-# ------------------------------------------------------------
-# 13) Extraer coeficientes y errores estándar de ‘d2d_wins_dem_std_mps’
-# ------------------------------------------------------------
-coefs_dd_mps <- tibble(
-  horizon      = 0:12,
-  beta_dd      = map_dbl(models_dd, ~ coef(.x)["d2d_wins_dem_std_mps"]),
-  se_dd        = map_dbl(models_dd, ~ sqrt(vcov(.x)["d2d_wins_dem_std_mps", "d2d_wins_dem_std_mps"]))
-)
-
-# ------------------------------------------------------------
-# 14) Mostrar tabla de dinámica DD
-# ------------------------------------------------------------
-cat("\nTabla 11(b): Dinámica con Distance-to-Default (coeficiente de d2d_wins_dem_std_mps)\n")
-print(coefs_dd_mps)
-
-# ------------------------------------------------------------
-# 15) Graficar respuesta dinámica de Distance-to-Default
-# ------------------------------------------------------------
-p_dd_dyn <- ggplot(coefs_dd_mps, aes(x = horizon, y = beta_dd)) +
-  geom_line(size = 1, color = "firebrick") +
-  geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta_dd - 1.96 * se_dd,
-                  ymax = beta_dd + 1.96 * se_dd),
-              alpha = 0.2, fill = "firebrick") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Figura 11(b): Dinámica IR – DD × mps (con Ldl_capital)",
-    x     = "Horizonte (trimestres)",
-    y     = "Efecto acumulado de inversión"
-  ) +
-  theme_minimal()
-
-print(p_dd_dyn)
-
-
-
-# ------------------------------------------------------------
-# Fin del script para Figura 11
-# ------------------------------------------------------------
-
-# *******************************************************************************
-# Figure 12 (usando toda la muestra, variable “cash_ratio” en lugar de Size)
-# *******************************************************************************
-
-# 0) Cargar librerías necesarias
-# Si falta alguna, instálala con install.packages(...)
-library(haven)     # read_dta()
-library(zoo)       # as.yearqtr()
-library(dplyr)     # manipulación de datos
-library(tidyr)     # replace_na()
-library(purrr)     # map() y map_dfc()
-library(fixest)    # feols()
-library(ggplot2)   # graficar
-
-# ------------------------------------------------------------
-# 1) Leer panel completo (sin recortes de periodo) y crear variable trimestral
-# ------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df_full <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),    # convierte a yearqtr
-    quarter = as.factor(dateq)      # factor trimestral (opcional)
-  ) %>%
-  arrange(name, dateq)
-
-# ------------------------------------------------------------
-# 2) Preprocesar variables básicas: dlog_capital, Ldl_capital, controles firma‐nivel
-# ------------------------------------------------------------
-df_full <- df_full %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) “Limpiar” capital para logaritmos (si ≤0 → NA)
-    capital2     = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    log_capital  = log(capital2),
-    lag_log_cap  = lag(log_capital),
-    dlog_capital = log_capital - lag_log_cap,
-    Ldl_capital  = lag(dlog_capital, 1),
-    
-    # 2.2) Venta trimestral para controlar crecimiento de ventas
-    saleq2       = if_else(!is.na(saleq) & saleq > 0, saleq, NA_real_),
-    log_sales    = log(saleq2),
-    rsales_g     = log_sales - lag(log_sales),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    
-    # 2.3) Estandarizar apalancamiento y distance‐to‐default
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std  = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    )
-  ) %>%
-  ungroup() %>%
-  # 2.4) Eliminar variables intermedias ya no necesarias
-  select(-capital2, -lag_log_cap, -saleq2, -rsales_g)
-
-# ------------------------------------------------------------
-# 3) Generar proxies de liquidez (“cash_ratio”) y sus interacciones
-# ------------------------------------------------------------
-df_full <- df_full %>%
-  group_by(dateq) %>%
-  mutate(
-    # 3.1) Estandarizar cash_ratio para cada trimestre
-    cash_ratio_std = if_else(
-      !is.na(cash_ratio),
-      (cash_ratio - mean(cash_ratio, na.rm = TRUE)) / sd(cash_ratio, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 3.2) Dummy HighCash = 1 si cash_ratio ≥ mediana(trimestre), 0 si < mediana
-    median_cr   = median(cash_ratio, na.rm = TRUE),
-    HighCash    = as.numeric(cash_ratio >= median_cr)
-  ) %>%
-  ungroup() %>%
-  mutate(
-    # 3.3) Interacciones con choque raw (mps) y con crecimiento de GDP (dlog_gdp)
-    lev_gdp    = lev_std * dlog_gdp,
-    dd_gdp     = dd_std  * dlog_gdp,
-    lev_mps    = lev_std * mps,
-    dd_mps     = dd_std  * mps,
-    
-    # 3.4) Interacciones liquidez × mps:
-    cash_mps      = cash_ratio_std * mps,   # liquidez continua
-    highcash_mps  = HighCash * mps          # liquidez dummy
-  ) %>%
-  # 3.5) Eliminar variable intermedia
-  select(-median_cr)
-
-# ------------------------------------------------------------
-# 4) Crear variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-# ------------------------------------------------------------
-df_dyn <- df_full %>% arrange(name, dateq)
-
-for (h in 0:12) {
-  new_col <- paste0("cumF", h, "_dlog_capital")
-  df_dyn <- df_dyn %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      !!new_col := rowSums(
-        map_dfc(0:h, ~ lead(dlog_capital, .x)),
-        na.rm = TRUE
-      )
-    ) %>%
-    ungroup()
-}
-
-# ------------------------------------------------------------
-# 5) Reemplazar NA en regressors (para no perder filas salvo si falta cumFh)
-# ------------------------------------------------------------
-df_dyn <- df_dyn %>%
-  mutate(
-    across(
-      c(
-        rsales_g_std, Ldl_capital,
-        lev_gdp, lev_mps,
-        dd_gdp, dd_mps,
-        cash_ratio_std, cash_mps, highcash_mps
-      ),
-      ~ replace_na(.x, 0)
-    )
-  )
-
-# ------------------------------------------------------------
-# 6) Definir controles firma‐nivel y efectos fijos
-#    - Controles: rsales_g_std  
-#    - FEs: name (firma) + Country_x (país)
-# ------------------------------------------------------------
-controls_firm <- c("rsales_g_std")
-# Efectos fijos se colocarán en la fórmula con “| name + Country_x”
-
-# ------------------------------------------------------------
-# 7) Verificar que existan las columnas que necesitamos
-# ------------------------------------------------------------
-stopifnot(
-  all(paste0("cumF", 0:12, "_dlog_capital") %in% colnames(df_dyn)),
-  all(c(
-    "lev_gdp", "lev_mps",
-    "dd_gdp", "dd_mps",
-    "Ldl_capital",
-    "cash_mps", "highcash_mps"
-  ) %in% colnames(df_dyn))
-)
-
-# ------------------------------------------------------------
-# 8) Estimar dinámicas para Toda la muestra (h = 0…12)
-#    (a) Liquidez continua: “cash_mps”
-# ------------------------------------------------------------
-models_cashc <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "cash_mps + lev_gdp + lev_mps + dd_gdp + dd_mps + Ldl_capital + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_cashc) <- paste0("m", 0:12)
-
-# ------------------------------------------------------------
-# 9) Extraer coeficientes y errores de “cash_mps” (liquidez continua)
-# ------------------------------------------------------------
-coefs_cashc <- tibble(
-  horizon    = 0:12,
-  beta_cashc = map_dbl(models_cashc, ~ coef(.x)["cash_mps"]),
-  se_cashc   = map_dbl(models_cashc, ~ sqrt(vcov(.x)["cash_mps", "cash_mps"]))
-)
-
-cat("\nFigura 12(a): Toda la muestra – coeficiente cash_mps (liquidez continua × mps)\n")
-print(coefs_cashc)
-
-# ------------------------------------------------------------
-# 10) Graficar respuesta dinámica de “cash_mps”
-# ------------------------------------------------------------
-p_cashc <- ggplot(coefs_cashc, aes(x = horizon, y = beta_cashc)) +
-  geom_line(size = 1, color = "forestgreen") +
-  geom_point(size = 2, color = "forestgreen") +
-  geom_ribbon(aes(ymin = beta_cashc - 1.96 * se_cashc,
-                  ymax = beta_cashc + 1.96 * se_cashc),
-              alpha = 0.2, fill = "forestgreen") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Fig 12(a): Dinámica – cash_mps (liquidez continua × mps)",
-    x     = "Horizonte (trimestres)",
-    y     = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-print(p_cashc)
-
-# ------------------------------------------------------------
-# 11) Estimar dinámicas (b) Liquidez dummy: “highcash_mps”
-# ------------------------------------------------------------
-models_highc <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "highcash_mps + lev_gdp + lev_mps + dd_gdp + dd_mps + Ldl_capital + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_highc) <- paste0("m", 0:12)
-
-# ------------------------------------------------------------
-# 12) Extraer coeficientes y errores de “highcash_mps” (liquidez dummy)
-# ------------------------------------------------------------
-coefs_highc <- tibble(
-  horizon     = 0:12,
-  beta_highc  = map_dbl(models_highc, ~ coef(.x)["highcash_mps"]),
-  se_highc    = map_dbl(models_highc, ~ sqrt(vcov(.x)["highcash_mps", "highcash_mps"]))
-)
-
-cat("\nFigura 12(b): Toda la muestra – coeficiente highcash_mps (liquidez dummy × mps)\n")
-print(coefs_highc)
-
-# ------------------------------------------------------------
-# 13) Graficar respuesta dinámica de “highcash_mps”
-# ------------------------------------------------------------
-p_highc <- ggplot(coefs_highc, aes(x = horizon, y = beta_highc)) +
-  geom_line(size = 1, color = "darkorange") +
-  geom_point(size = 2, color = "darkorange") +
-  geom_ribbon(aes(ymin = beta_highc - 1.96 * se_highc,
-                  ymax = beta_highc + 1.96 * se_highc),
-              alpha = 0.2, fill = "darkorange") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Fig 12(b): Dinámica – highcash_mps (liquidez dummy × mps)",
-    x     = "Horizonte (trimestres)",
-    y     = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-print(p_highc)
-
-# ------------------------------------------------------------
-# Fin del script para Figure 12 con toda la muestra (sin recortes de periodo)
-# ------------------------------------------------------------
-
-
-
-
-
-# *******************************************************************************
-# Figura 13: Joint Dynamics en Posición Financiera (Leverage o DD) y Liquidez
-# (Se usa TODA la muestra, sin recortes de periodos antiguos)
-# *******************************************************************************
-
-# 0) Cargar librerías necesarias
-# Si falta alguna, instálala con: install.packages(c("haven","zoo","dplyr","tidyr","purrr","fixest","ggplot2"))
-library(haven)     # read_dta()
-library(zoo)       # as.yearqtr()
-library(dplyr)     # Manipulación de datos
-library(tidyr)     # replace_na()
-library(purrr)     # map(), map_dfc()
-library(fixest)    # feols()
-library(ggplot2)   # Graficar
-
-# ------------------------------------------------------------
-# 1) Leer el panel “construct_panel_data_final.dta” (incluye cash_ratio)
-# ------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),    # convierte a trimestral
-    quarter = as.factor(dateq)      # factor trimestral (opcional)
-  ) %>%
-  arrange(name, dateq)
-
-# ------------------------------------------------------------
-# 2) Preprocesar variables básicas:
-#    - dlog_capital, Ldl_capital
-#    - Controles firm‐level (rsales_g_std)
-#    - Apalancamiento (lev_std), DD (dd_std)
-#    - Liquidez (cash_ratio_std, HighCash)
-# ------------------------------------------------------------
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) Evitar log(0) en “capital”
-    capital2     = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    log_capital  = log(capital2),
-    lag_log_cap  = lag(log_capital),
-    dlog_capital = log_capital - lag_log_cap,
-    Ldl_capital  = lag(dlog_capital, 1),
-    
-    # 2.2) Crecimiento de ventas para control rsales_g_std
-    saleq2       = if_else(!is.na(saleq) & saleq > 0, saleq, NA_real_),
-    log_sales    = log(saleq2),
-    rsales_g     = log_sales - lag(log_sales),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    
-    # 2.3) Estandarizar apalancamiento y DD
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std  = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.4) Estandarizar liquidez (cash_ratio) por trimestre
-    cash_ratio2    = if_else(!is.na(cash_ratio), cash_ratio, NA_real_),
-    cash_ratio_std = (cash_ratio2 - mean(cash_ratio2, na.rm = TRUE)) / sd(cash_ratio2, na.rm = TRUE),
-    
-    # 2.5) Dummy HighCash = 1 si cash_ratio ≥ mediana(cash_ratio) de ese trimestre
-    median_cr = median(cash_ratio2, na.rm = TRUE),
-    HighCash  = as.numeric(cash_ratio2 >= median_cr)
-  ) %>%
-  ungroup() %>%
-  # 2.6) Eliminar variables intermedias no necesarias
-  select(-capital2, -lag_log_cap, -saleq2, -rsales_g, -log_sales, -cash_ratio2, -median_cr)
-
-# ------------------------------------------------------------
-# 3) Interacciones con shocks:
-#    - Financieras: lev_gdp, lev_mps, dd_gdp, dd_mps
-#    - Liquidez: cash_mps (continua), highcash_mps (dummy)
-# ------------------------------------------------------------
-df <- df %>%
-  mutate(
-    # Choques macro y financieros
-    lev_gdp = lev_std * dlog_gdp,
-    dd_gdp  = dd_std  * dlog_gdp,
-    lev_mps = lev_std * mps,
-    dd_mps  = dd_std  * mps,
-    
-    # Interacciones liquidez × raw shock (mps)
-    cash_mps     = cash_ratio_std * mps,    # liquidez continua
-    highcash_mps = HighCash * mps           # liquidez dummy
-  )
-
-# ------------------------------------------------------------
-# 4) Generar variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-# ------------------------------------------------------------
-df_dyn <- df %>% arrange(name, dateq)
-for (h in 0:12) {
-  new_col <- paste0("cumF", h, "_dlog_capital")
-  df_dyn <- df_dyn %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      !!new_col := rowSums(
-        map_dfc(0:h, ~ lead(dlog_capital, .x)),
-        na.rm = TRUE
-      )
-    ) %>%
-    ungroup()
-}
-
-# ------------------------------------------------------------
-# 5) Reemplazar NA en todos los regresores de RHS (para no eliminar filas salvo faltante de cumFh)
-# ------------------------------------------------------------
-df_dyn <- df_dyn %>%
-  mutate(
-    across(
-      c(
-        rsales_g_std, Ldl_capital,
-        lev_gdp, lev_mps,
-        dd_gdp, dd_mps,
-        cash_ratio_std, cash_mps, highcash_mps
-      ),
-      ~ replace_na(.x, 0)
-    )
-  )
-
-# ------------------------------------------------------------
-# 6) Definir controles y FEs:
-#    - Controles de firma: rsales_g_std
-#    - FEs: name (firma) + Country_x (país)
-# ------------------------------------------------------------
-controls_firm <- c("rsales_g_std")
-# En la fórmula R: se escribirá “| name + Country_x”
-
-# ------------------------------------------------------------
-# 7) (a) Joint Dynamics: Leverage & Liquidez (h = 0…12)
-#    Especificación:
-#      cumFh_dlog_capital ~ 
-#         cash_ratio_std + cash_mps + highcash_mps +
-#         lev_gdp + lev_mps + Ldl_capital + rsales_g_std
-#      | name + Country_x, cluster(~dateq + name)
-# 
-#    NOTA: incluimos tanto cash_ratio_std (nivel) como sus interacciones cash_mps / highcash_mps
-# ------------------------------------------------------------
-models_lev_liq <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "cash_ratio_std + cash_mps + highcash_mps + ",
-    "lev_gdp + lev_mps + Ldl_capital + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_lev_liq) <- paste0("m", 0:12)
-
-# ------------------------------------------------------------
-# 8) Extraer coeficientes y errores para “cash_mps” y “lev_mps”
-# ------------------------------------------------------------
-coefs_lev_liq <- tibble(
-  horizon      = 0:12,
-  beta_cash    = map_dbl(models_lev_liq, ~ coef(.x)["cash_mps"]),
-  se_cash      = map_dbl(models_lev_liq, ~ sqrt(vcov(.x)["cash_mps", "cash_mps"])),
-  beta_highc   = map_dbl(models_lev_liq, ~ coef(.x)["highcash_mps"]),
-  se_highc     = map_dbl(models_lev_liq, ~ sqrt(vcov(.x)["highcash_mps", "highcash_mps"])),
-  beta_lev     = map_dbl(models_lev_liq, ~ coef(.x)["lev_mps"]),
-  se_lev       = map_dbl(models_lev_liq, ~ sqrt(vcov(.x)["lev_mps", "lev_mps"]))
-)
-
-cat("\nFigura 13(a): Dynamics – Leverage & Liquidez\n")
-print(coefs_lev_liq)
-
-# ------------------------------------------------------------
-# 9) Graficar respuestas dinámicas combinadas:
-#    - cash_mps (línea azul), highcash_mps (línea naranja punteada)
-#    - lev_mps (línea roja)
-# ------------------------------------------------------------
-p_lev_liq <- ggplot(coefs_lev_liq, aes(x = horizon)) +
-  # Interacción cash_mps (liquidez continua x mps)
-  geom_line(aes(y = beta_cash), size = 1, color = "blue") +
-  geom_ribbon(aes(ymin = beta_cash - 1.96 * se_cash,
-                  ymax = beta_cash + 1.96 * se_cash),
-              fill = "blue", alpha = 0.2) +
-  # Interacción highcash_mps (liquidez dummy x mps)
-  geom_line(aes(y = beta_highc), size = 1, linetype = "dashed", color = "orange") +
-  geom_ribbon(aes(ymin = beta_highc - 1.96 * se_highc,
-                  ymax = beta_highc + 1.96 * se_highc),
-              fill = "orange", alpha = 0.2) +
-  # Interacción lev_mps (apalancamiento x mps)
-  geom_line(aes(y = beta_lev), size = 1, color = "red") +
+# 11b) Gráfico Leverage × Shock
+p13b <- ggplot(lev_size_coefs, aes(x = horizon)) +
+  geom_line(aes(y = beta_lev), size = 1, color = "firebrick") +
   geom_ribbon(aes(ymin = beta_lev - 1.96 * se_lev,
                   ymax = beta_lev + 1.96 * se_lev),
-              fill = "red", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
+              alpha = 0.2, fill = "firebrick") +
   labs(
-    title    = "Figura 13(a): Joint Dynamics – Liquidez (blue/orange) y Leverage (red)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x        = "Horizonte (trimestres)",
-    y        = "Coeficiente acumulado"
+    title = "Figura 13(b): Leverage × Shock",
+    x     = "Horizonte (trimestres)",
+    y     = "Coeficiente β_h"
   ) +
+  scale_x_continuous(breaks = 0:12) +
   theme_minimal()
-print(p_lev_liq)
+
+# 12) Mostrar ambas gráficas uno debajo de la otra
+(p13a / p13b) +
+  plot_annotation(
+    title = "Figura 13: Dinámica Conjunta de Posición Financiera y Tamaño"
+  )
+
+
+
 
 # ------------------------------------------------------------
-# 10) (b) Joint Dynamics: DD & Liquidez (h = 0…12)
-#     Especificación:
-#       cumFh_dlog_capital ~ 
-#          cash_ratio_std + cash_mps + highcash_mps +
-#          dd_gdp + dd_mps + Ldl_capital + rsales_g_std
-#       | name + Country_x, cluster(~dateq + name)
+# Figura 14 (ajustada): Dinámica Conjunta de Posición Financiera (Leverage o DD) y Edad
+# (toda la muestra)
 # ------------------------------------------------------------
-models_dd_liq <- map(0:12, function(h) {
+
+# Partir de df con dateq ya trimestral y name, Country
+# ------------------------------------------------------------------
+df_cntl14 <- df
+
+# 1) Crear dlog_capital y Ldl_capital si faltan
+if (!all(c("dlog_capital","Ldl_capital") %in% names(df_cntl14))) {
+  df_cntl14 <- df_cntl14 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      capital2     = if_else(!is.na(capital)&capital>0, capital, NA_real_),
+      log_capital  = log(capital2),
+      lag_log_cap  = lag(log_capital),
+      dlog_capital = log_capital - lag_log_cap,
+      Ldl_capital  = lag(dlog_capital,1)
+    ) %>% ungroup() %>% select(-capital2, -log_capital, -lag_log_cap)
+} else message("Variables dlog_capital y Ldl_capital ya existen; omitiendo.")
+
+# 2) Crear controles firm-level si faltan
+if (!"rsales_g_std" %in% names(df_cntl14)) {
+  df_cntl14 <- df_cntl14 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      saleq2       = if_else(!is.na(saleq)&saleq>0, saleq, NA_real_),
+      rsales_g     = log(saleq2) - lag(log(saleq2)),
+      rsales_g_std = (rsales_g - mean(rsales_g, na.rm=TRUE)) / sd(rsales_g, na.rm=TRUE)
+    ) %>% ungroup() %>% select(-saleq2, -rsales_g)
+} else message("Variable rsales_g_std ya existe; omitiendo.")
+
+if (!all(c("lev_std","dd_std") %in% names(df_cntl14))) {
+  df_cntl14 <- df_cntl14 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      lev_std = (leverage - mean(leverage, na.rm=TRUE)) / sd(leverage, na.rm=TRUE),
+      dd_std  = (dd        - mean(dd,        na.rm=TRUE)) / sd(dd,        na.rm=TRUE)
+    ) %>% ungroup()
+} else message("Variables lev_std y dd_std ya existen; omitiendo.")
+
+# 3) Crear dummies de edad (joven, middle, old) si faltan
+if (!all(c("AgeYoung","AgeMiddle","AgeOld") %in% names(df_cntl14))) {
+  df_cntl14 <- df_cntl14 %>%
+    group_by(dateq) %>%
+    mutate(
+      p25 = quantile(age_sample, 0.25, na.rm=TRUE),
+      p75 = quantile(age_sample, 0.75, na.rm=TRUE)
+    ) %>%
+    ungroup() %>%
+    group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      AgeYoung  = as.numeric(age_sample <  p25),
+      AgeMiddle = as.numeric(age_sample >= p25 & age_sample < p75),
+      AgeOld    = as.numeric(age_sample >= p75)
+    ) %>%
+    ungroup() %>%
+    select(-p25, -p75)
+} else message("Dummies de edad ya existen; omitiendo.")
+
+
+# 4) Crear interacciones con GDP y Shock (sólo si existen las variables)
+# -----------------------------------------------------------------------
+# (a) Interacciones con dlog_gdp
+if ("dlog_gdp" %in% names(df_cntl14)) {
+  df_cntl14 <- df_cntl14 %>%
+    mutate(
+      AgeMiddle_gdp = AgeMiddle * dlog_gdp,
+      AgeOld_gdp    = AgeOld    * dlog_gdp,
+      lev_gdp       = lev_std   * dlog_gdp,
+      dd_gdp        = dd_std    * dlog_gdp
+    )
+} else {
+  warning("La variable 'dlog_gdp' no existe en df_cntl14; se omiten interacciones con GDP.")
+}
+
+# (b) Interacciones con shock
+if ("shock" %in% names(df_cntl14)) {
+  df_cntl14 <- df_cntl14 %>%
+    mutate(
+      AgeMiddle_shock = AgeMiddle * shock,
+      AgeOld_shock    = AgeOld    * shock,
+      lev_shock       = lev_std   * shock,
+      dd_shock        = dd_std    * shock
+    )
+} else {
+  stop("Falta la variable 'shock' en df_cntl14; no se pueden crear interacciones con shock.")
+}
+
+# 5) Construir dinámicas acumuladas cumFh_dlog_capital h=0…12
+vars14 <- paste0("cumF",0:12,"_dlog_capital")
+if (!all(vars14 %in% names(df_cntl14))) {
+  df_dyn14 <- df_cntl14 %>% group_by(name) %>% arrange(dateq) %>%
+    group_modify(~{tmp<-.x;for(h in 0:12) tmp[[paste0("cumF",h,"_dlog_capital")]]<-rowSums(map_dfc(0:h,~lead(tmp$dlog_capital,.x)),na.rm=TRUE);tmp})%>%ungroup()
+} else { message("Variables dinámicas ya existen; omitiendo."); df_dyn14<-df_cntl14 }
+
+# 6) Definir controles firm-level y macro
+controls_firm14  <- c("rsales_g_std","Ldl_capital")
+controls_macro14 <- c("dlog_gdp","dlog_cpi","unemp","embigl")
+all_controls14   <- paste(c(controls_firm14,controls_macro14), collapse=" + ")
+
+
+
+library(purrr)
+library(fixest)
+
+# 7a) Estimar Joint Dynamics – Leverage y Edad (ajustado)
+# --------------------------------------------------------
+
+# Detectar qué interacciones y controles están presentes
+age_gdp_terms    <- intersect(c("AgeMiddle_gdp", "AgeOld_gdp"), names(df_dyn14))
+age_shock_terms  <- intersect(c("AgeMiddle_shock", "AgeOld_shock"), names(df_dyn14))
+lev_gdp_term     <- if ("lev_gdp"   %in% names(df_dyn14)) "lev_gdp"   else NULL
+lev_shock_term   <- if ("lev_shock" %in% names(df_dyn14)) "lev_shock" else NULL
+
+firm_terms       <- intersect(controls_firm14, names(df_dyn14))
+macro_terms      <- intersect(controls_macro14, names(df_dyn14))
+
+# Combinar todos los RHS terms en orden lógico
+rhs_base <- c(age_gdp_terms,
+              age_shock_terms,
+              lev_gdp_term,
+              lev_shock_term,
+              firm_terms,
+              macro_terms)
+
+res_lev_age <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
+  fml_str <- paste0(
     dep_var, " ~ ",
-    "cash_ratio_std + cash_mps + highcash_mps + ",
-    "dd_gdp + dd_mps + Ldl_capital + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
+    paste(rhs_base, collapse = " + "),
+    " | name + Country"
+  )
+  feols(
+    as.formula(fml_str),
+    data    = df_dyn14,
+    cluster = ~ name + Country
+  )
 })
-names(models_dd_liq) <- paste0("m", 0:12)
 
 # ------------------------------------------------------------
-# 11) Extraer coeficientes y errores para “cash_mps” y “dd_mps”
+# 7b) Estimar Joint Dynamics – DD y Edad (ajustado)
 # ------------------------------------------------------------
-coefs_dd_liq <- tibble(
+# Detectar qué términos de DD & Edad están presentes
+age_gdp_terms    <- intersect(c("AgeMiddle_gdp", "AgeOld_gdp"), names(df_dyn14))
+age_shock_terms  <- intersect(c("AgeMiddle_shock", "AgeOld_shock"), names(df_dyn14))
+dd_gdp_term      <- if ("dd_gdp"    %in% names(df_dyn14)) "dd_gdp"    else NULL
+dd_shock_term    <- if ("dd_shock"  %in% names(df_dyn14)) "dd_shock"  else NULL
+
+# Ya tienes controls_firm14 y controls_macro14 de antes
+firm_terms       <- intersect(controls_firm14, names(df_dyn14))
+macro_terms      <- intersect(controls_macro14, names(df_dyn14))
+
+rhs_base_dd <- c(
+  age_gdp_terms,
+  age_shock_terms,
+  dd_gdp_term,
+  dd_shock_term,
+  firm_terms,
+  macro_terms
+)
+
+res_dd_age <- map(0:12, function(h) {
+  dep_var <- paste0("cumF", h, "_dlog_capital")
+  fml_str <- paste0(
+    dep_var, " ~ ",
+    paste(rhs_base_dd, collapse = " + "),
+    " | name + Country"
+  )
+  feols(as.formula(fml_str),
+        data    = df_dyn14,
+        cluster = ~ name + Country)
+})
+
+
+# ------------------------------------------------------------
+# 8) Extraer coeficientes y errores para DD & Edad
+# ------------------------------------------------------------
+dd_age_coefs <- tibble(
+  horizon      = 0:12,
+  beta_mid_age = map_dbl(res_dd_age, ~ coef(.x)["AgeMiddle_shock"]),
+  se_mid_age   = map_dbl(res_dd_age, ~ sqrt(vcov(.x)["AgeMiddle_shock", "AgeMiddle_shock"])),
+  beta_old_age = map_dbl(res_dd_age, ~ coef(.x)["AgeOld_shock"]),
+  se_old_age   = map_dbl(res_dd_age, ~ sqrt(vcov(.x)["AgeOld_shock", "AgeOld_shock"])),
+  beta_dd_shock= map_dbl(res_dd_age, ~ coef(.x)["dd_shock"]),
+  se_dd_shock  = map_dbl(res_dd_age, ~ sqrt(vcov(.x)["dd_shock", "dd_shock"]))
+)
+
+
+# 9) Guardar resultados opcional
+write_csv(lev_age_coefs, file.path(base_dir,"dynamics_lev_age.csv"))
+write_csv(dd_age_coefs,  file.path(base_dir,"dynamics_dd_age.csv"))
+
+# 10a) Gráfico Joint Dynamics – Leverage & Edad
+# Preparar datos en formato largo para leyenda
+lev_plot <- lev_age_coefs %>%
+  select(horizon,
+         AgeMiddle = beta_mid_age, AgeOld = beta_old_age, Leverage = beta_lev_shock) %>%
+  pivot_longer(-horizon, names_to = "series", values_to = "beta")
+se_plot_lev <- lev_age_coefs %>%
+  select(horizon,
+         AgeMiddle = se_mid_age, AgeOld = se_old_age, Leverage = se_lev_shock) %>%
+  pivot_longer(-horizon, names_to = "series", values_to = "se")
+lev_plot <- left_join(lev_plot, se_plot_lev, by = c("horizon", "series"))
+
+p14a <- ggplot(lev_plot, aes(x = horizon, y = beta, color = series, fill = series)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se), alpha = 0.2) +
+  scale_color_manual(
+    values = c("AgeMiddle" = "blue", "AgeOld" = "orange", "Leverage" = "red"),
+    labels = c("Edad media", "Edad alta", "Leverage × Shock"),
+    name = "Serie"
+  ) +
+  scale_fill_manual(
+    values = c("AgeMiddle" = "blue", "AgeOld" = "orange", "Leverage" = "red"),
+    labels = c("Edad media", "Edad alta", "Leverage × Shock"),
+    name = "Serie"
+  ) +
+  labs(
+    title = "Figura 14(a): Leverage & Edad",
+    x     = "Horizonte (trimestres)",
+    y     = "Efecto acumulado de inversión"
+  ) +
+  scale_x_continuous(breaks = 0:12) +
+  theme_minimal()
+
+# 10b) Gráfico Joint Dynamics – DD & Edad
+# Preparar datos en formato largo
+dd_plot <- dd_age_coefs %>%
+  select(horizon,
+         AgeMiddle = beta_mid_age, AgeOld = beta_old_age, DD = beta_dd_shock) %>%
+  pivot_longer(-horizon, names_to = "series", values_to = "beta")
+se_plot_dd <- dd_age_coefs %>%
+  select(horizon,
+         AgeMiddle = se_mid_age, AgeOld = se_old_age, DD = se_dd_shock) %>%
+  pivot_longer(-horizon, names_to = "series", values_to = "se")
+dd_plot <- left_join(dd_plot, se_plot_dd, by = c("horizon", "series"))
+
+p14b <- ggplot(dd_plot, aes(x = horizon, y = beta, color = series, fill = series)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = beta - 1.96 * se, ymax = beta + 1.96 * se), alpha = 0.2) +
+  scale_color_manual(
+    values = c("AgeMiddle" = "blue", "AgeOld" = "orange", "DD" = "darkgreen"),
+    labels = c("Edad media", "Edad alta", "DD × Shock"),
+    name = "Serie"
+  ) +
+  scale_fill_manual(
+    values = c("AgeMiddle" = "blue", "AgeOld" = "orange", "DD" = "darkgreen"),
+    labels = c("Edad media", "Edad alta", "DD × Shock"),
+    name = "Serie"
+  ) +
+  labs(
+    title = "Figura 14(b): DD & Edad",
+    x     = "Horizonte (trimestres)",
+    y     = "Coeficiente β_h"
+  ) +
+  scale_x_continuous(breaks = 0:12) +
+  theme_minimal()
+
+# 11) Mostrar ambas gráficas apiladas
+(p14a / p14b) +
+  plot_annotation(title = "Figura 14: Joint Dynamics Posición Financiera y Edad")
+p14b <- ggplot(dd_age_coefs, aes(x=horizon)) +
+  geom_line(aes(y=beta_mid_age), size=1, color="blue") +
+  geom_ribbon(aes(ymin=beta_mid_age-1.96*se_mid_age,ymax=beta_mid_age+1.96*se_mid_age), fill="blue", alpha=0.2) +
+  geom_line(aes(y=beta_old_age), size=1, color="orange") +
+  geom_ribbon(aes(ymin=beta_old_age-1.96*se_old_age,ymax=beta_old_age+1.96*se_old_age), fill="orange", alpha=0.2) +
+  geom_line(aes(y=beta_dd_shock), size=1, color="darkgreen") +
+  geom_ribbon(aes(ymin=beta_dd_shock-1.96*se_dd_shock,ymax=beta_dd_shock+1.96*se_dd_shock), fill="darkgreen", alpha=0.2) +
+  labs(
+    title = "Figura 14(b): DD & Edad",
+    x     = "Horizonte (trimestres)",
+    y     = "Efecto acumulado de inversión"
+  ) +
+  scale_x_continuous(breaks = 0:12) +
+  theme_minimal()
+
+# 11) Mostrar ambas gráficas apiladas
+(p14a / p14b) +
+  plot_annotation(title = "Figura 14: Joint Dynamics Posición Financiera y Edad")
+
+
+
+
+# ------------------------------------------------------------
+# Figura 16 (ajustada): Dinámica Conjunta de Posición Financiera (Leverage o DD) y Liquidez
+# (toda la muestra)
+# ------------------------------------------------------------
+
+df_cntl16 <- df
+
+# 1) dlog_capital y Ldl_capital
+if (!all(c("dlog_capital","Ldl_capital") %in% names(df_cntl16))) {
+  df_cntl16 <- df_cntl16 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      capital2     = if_else(!is.na(capital)&capital>0, capital, NA_real_),
+      log_capital  = log(capital2),
+      dlog_capital = log_capital - lag(log_capital),
+      Ldl_capital  = lag(dlog_capital)
+    ) %>% ungroup() %>% select(-capital2, -log_capital)
+} else message("dlog_capital y Ldl_capital ya existen; omitiendo.")
+
+# 2) Controles firm-level
+if (!"rsales_g_std" %in% names(df_cntl16)) {
+  df_cntl16 <- df_cntl16 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      rsales_g     = log(saleq) - log(lag(saleq)),
+      rsales_g_std = (rsales_g - mean(rsales_g,na.rm=TRUE))/sd(rsales_g,na.rm=TRUE)
+    ) %>% ungroup() %>% select(-rsales_g)
+} else message("rsales_g_std ya existe; omitiendo.")
+
+if (!all(c("lev_std","dd_std","liq_std") %in% names(df_cntl16))) {
+  df_cntl16 <- df_cntl16 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      lev_std  = (leverage - mean(leverage,na.rm=TRUE))/sd(leverage,na.rm=TRUE),
+      dd_std   = (dd - mean(dd,na.rm=TRUE))/sd(dd,na.rm=TRUE),
+      liq_std  = (current_ratio - mean(current_ratio,na.rm=TRUE))/sd(current_ratio,na.rm=TRUE)
+    ) %>% ungroup()
+} else message("lev_std, dd_std o liq_std ya existen; omitiendo.")
+
+# 3) Interacciones
+ints16 <- c("lev_shock","dd_shock","liq_shock")
+if (!all(ints16 %in% names(df_cntl16))) {
+  df_cntl16 <- df_cntl16 %>% mutate(
+    lev_shock = lev_std * shock,
+    dd_shock  = dd_std  * shock,
+    liq_shock = liq_std * shock
+  )
+} else message("Interacciones de choque ya existen; omitiendo.")
+
+# 4) Dinámicas acumuladas
+vars16 <- paste0("cumF",0:12,"_dlog_capital")
+if (!all(vars16 %in% names(df_cntl16))) {
+  df_dyn16 <- df_cntl16 %>% group_by(name) %>% arrange(dateq) %>%
+    group_modify(~{tmp<-.x; for(h in 0:12) tmp[[paste0("cumF",h,"_dlog_capital")]]<-rowSums(map_dfc(0:h,~lead(tmp$dlog_capital,.x)),na.rm=TRUE); tmp}) %>% ungroup()
+} else { message("Variables dinámicas ya existen; omitiendo."); df_dyn16 <- df_cntl16 }
+
+# ------------------------------------------------------------
+# 5) Definir controles firm-level y macro (solo los macro presentes)
+# ------------------------------------------------------------
+controls_firm  <- c("rsales_g_std", "Ldl_capital")
+controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+
+# Detectar qué controles macro existen en df_dyn16
+present_macro <- intersect(controls_macro, names(df_dyn16))
+if (length(present_macro) < length(controls_macro)) {
+  warning(
+    "Faltan controles macro: ",
+    paste(setdiff(controls_macro, present_macro), collapse = ", "),
+    ". Se omitirán."
+  )
+}
+
+# Construir vector de todos los RHS
+rhs_base <- c("lev_shock", "liq_shock", controls_firm, present_macro)
+
+# ------------------------------------------------------------
+# 6a) Estimar Leverage & Liquidez
+# ------------------------------------------------------------
+res_lev_liq <- map(0:12, function(h) {
+  dep_var <- paste0("cumF", h, "_dlog_capital")
+  fml_str <- paste0(
+    dep_var, " ~ ",
+    paste(rhs_base, collapse = " + "),
+    " | name + Country"
+  )
+  feols(
+    as.formula(fml_str),
+    data    = df_dyn16,
+    cluster = ~ name + Country
+  )
+})
+
+# 6b) Estimar DD & Liquidez
+res_dd_liq <- map(0:12, function(h) {
+  dep_var <- paste0("cumF", h, "_dlog_capital")
+  fml_str <- paste0(
+    dep_var, " ~ dd_shock + liq_shock + ",
+    paste(rhs_base[-1], collapse = " + "),  # omitimos lev_shock
+    " | name + Country"
+  )
+  feols(
+    as.formula(fml_str),
+    data    = df_dyn16,
+    cluster = ~ name + Country
+  )
+})
+
+# 7) Extraer coeficientes
+tbl_lev_liq <- tibble(
+  horizon      = 0:12,
+  lev_beta     = map_dbl(res_lev_liq,~coef(.x)["lev_shock"]),
+  lev_se       = map_dbl(res_lev_liq,~sqrt(vcov(.x)["lev_shock","lev_shock"])),
+  liq_beta     = map_dbl(res_lev_liq,~coef(.x)["liq_shock"]),
+  liq_se       = map_dbl(res_lev_liq,~sqrt(vcov(.x)["liq_shock","liq_shock"]))
+)
+tbl_dd_liq <- tibble(
+  horizon      = 0:12,
+  dd_beta      = map_dbl(res_dd_liq,~coef(.x)["dd_shock"]),
+  dd_se        = map_dbl(res_dd_liq,~sqrt(vcov(.x)["dd_shock","dd_shock"])),
+  liq_beta     = map_dbl(res_dd_liq,~coef(.x)["liq_shock"]),
+  liq_se       = map_dbl(res_dd_liq,~sqrt(vcov(.x)["liq_shock","liq_shock"]))
+)
+
+# 8) Gráficos con leyenda
+data16a <- tbl_lev_liq %>% select(horizon, Leverage=lev_beta, Liquidez=liq_beta) %>% pivot_longer(-horizon,names_to="serie",values_to="beta")
+data16a_se <- tbl_lev_liq %>% select(horizon, Leverage=lev_se, Liquidez=liq_se) %>% pivot_longer(-horizon,names_to="serie",values_to="se")
+data16a <- left_join(data16a,data16a_se,by=c("horizon","serie"))
+
+p16a <- ggplot(data16a,aes(x=horizon,y=beta,color=serie,fill=serie))+
+  geom_line(size=1)+geom_ribbon(aes(ymin=beta-1.96*se,ymax=beta+1.96*se),alpha=0.2)+
+  scale_color_manual(values=c("Leverage"="red","Liquidez"="blue"),name="Serie")+
+  scale_fill_manual(values=c("Leverage"="red","Liquidez"="blue"),name="Serie")+
+  labs(title="Figura 16(a): Leverage & Liquidez",x="Horizonte",y="Efecto acumulado de inversión")+
+  scale_x_continuous(breaks=0:12)+theme_minimal()
+
+# 9) DD & Liquidez
+data16b <- tbl_dd_liq %>% select(horizon, DD=dd_beta, Liquidez=liq_beta) %>% pivot_longer(-horizon,names_to="serie",values_to="beta")
+data16b_se <- tbl_dd_liq %>% select(horizon, DD=dd_se, Liquidez=liq_se) %>% pivot_longer(-horizon,names_to="serie",values_to="se")
+data16b <- left_join(data16b,data16b_se,by=c("horizon","serie"))
+
+p16b <- ggplot(data16b,aes(x=horizon,y=beta,color=serie,fill=serie))+
+  geom_line(size=1)+geom_ribbon(aes(ymin=beta-1.96*se,ymax=beta+1.96*se),alpha=0.2)+
+  scale_color_manual(values=c("DD"="darkgreen","Liquidez"="blue"),name="Serie")+
+  scale_fill_manual(values=c("DD"="darkgreen","Liquidez"="blue"),name="Serie")+
+  labs(title="Figura 16(b): DD & Liquidez",x="Horizonte",y="Efecto acumulado de inversión")+
+  scale_x_continuous(breaks=0:12)+theme_minimal()
+
+# 10) Mostrar
+graph <- p16a / p16b + plot_annotation(title="Figura 16: Joint Dynamics Liquidez y Estado Financiero")
+graph
+
+
+
+# ------------------------------------------------------------
+# Figura 21 (ajustada): Dinámica de Respuesta Diferencial a Choques Monetarios
+# por Volatilidad de Ventas 5‑Year (toda la muestra)
+# ------------------------------------------------------------
+
+df_cntl21 <- df
+
+# 1) dlog_capital y Ldl_capital
+if (!all(c("dlog_capital","Ldl_capital") %in% names(df_cntl21))) {
+  df_cntl21 <- df_cntl21 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      capital2     = if_else(!is.na(capital)&capital>0,capital,NA_real_),
+      log_capital  = log(capital2),
+      dlog_capital = log_capital - lag(log_capital),
+      Ldl_capital  = lag(dlog_capital)
+    ) %>% ungroup() %>% select(-capital2,-log_capital)
+} else message("dlog_capital y Ldl_capital ya existen; omitiendo.")
+
+# # 2) Controles firm-level: ventas y liquidez
+if (!"rsales_g_std" %in% names(df_cntl21)) {
+  df_cntl21 <- df_cntl21 %>%
+    group_by(name) %>%
+    arrange(dateq, .by_group = TRUE) %>%
+    mutate(
+      rsales_g     = log(saleq) - log(lag(saleq)),
+      rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) /
+        sd(rsales_g, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    select(-rsales_g)
+} else {
+  message("rsales_g_std ya existe; omitiendo.")
+}
+
+if (!"liq_std" %in% names(df_cntl21)) {
+  df_cntl21 <- df_cntl21 %>%
+    group_by(name) %>%
+    arrange(dateq, .by_group = TRUE) %>%
+    mutate(
+      liq_std = (current_ratio - mean(current_ratio, na.rm = TRUE)) /
+        sd(current_ratio, na.rm = TRUE)
+    ) %>%
+    ungroup()
+} else {
+  message("liq_std ya existe; omitiendo.")
+}
+
+# 3) Volatilidad 5-Year
+if (!"vol_5yr_std" %in% names(df_cntl21)) {
+  df_cntl21 <- df_cntl21 %>%
+    group_by(name) %>%
+    arrange(dateq, .by_group = TRUE) %>%
+    mutate(
+      yoy_sales    = log(saleq) - lag(log(saleq), 4),
+      vol_5yr      = zoo::rollapply(yoy_sales, 20, sd, na.rm = TRUE, fill = NA, align = "right"),
+      vol_5yr_std  = (vol_5yr - mean(vol_5yr, na.rm = TRUE)) / sd(vol_5yr, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    select(-yoy_sales, -vol_5yr)
+} else {
+  message("vol_5yr_std ya existe; omitiendo.")
+}
+
+
+# 4) Interacciones con Volatilidad 5-Year
+if (!all(c("vol_5yr_std_gdp", "vol_5yr_std_shock") %in% names(df_cntl21))) {
+  
+  # (a) Sólo si existe dlog_gdp
+  if ("dlog_gdp" %in% names(df_cntl21)) {
+    df_cntl21 <- df_cntl21 %>%
+      mutate(
+        vol_5yr_std_gdp   = vol_5yr_std * dlog_gdp
+      )
+  } else {
+    warning("No existe 'dlog_gdp'; se omiten interacciones vol_5yr_std_gdp.")
+  }
+  
+  # (b) Sólo si existe shock
+  if ("shock" %in% names(df_cntl21)) {
+    df_cntl21 <- df_cntl21 %>%
+      mutate(
+        vol_5yr_std_shock = vol_5yr_std * shock
+      )
+  } else {
+    stop("Falta la variable 'shock'; no se pueden crear interacciones vol_5yr_std_shock.")
+  }
+  
+} else {
+  message("Interacciones de volatilidad ya existen; omitiendo.")
+}
+
+# 5) Dinámicas acumuladas
+vars21 <- paste0("cumF", 0:12, "_dlog_capital")
+
+if (!all(vars21 %in% names(df_cntl21))) {
+  df_dyn21 <- df_cntl21 %>%
+    group_by(name) %>%
+    arrange(dateq, .by_group = TRUE) %>%
+    group_modify(~{
+      tmp <- .x
+      for (h in 0:12) {
+        tmp[[ paste0("cumF", h, "_dlog_capital") ]] <-
+          rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
+      }
+      tmp
+    }) %>%
+    ungroup()
+} else {
+  message("Variables dinámicas ya existen; omitiendo.")
+  df_dyn21 <- df_cntl21
+}
+
+
+library(dplyr)
+library(purrr)
+library(fixest)
+
+# 6) Definir controles firm-level y macro (solo los macro presentes)
+controls_firm21  <- c("rsales_g_std", "liq_std")
+controls_macro21 <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+present_macro21  <- intersect(controls_macro21, names(df_dyn21))
+if (length(present_macro21) < length(controls_macro21)) {
+  warning(
+    "Faltan controles macro: ",
+    paste(setdiff(controls_macro21, present_macro21), collapse = ", "),
+    ". Se omitirán."
+  )
+}
+controls21_terms <- c(controls_firm21, present_macro21)
+
+# 7) Modelos vol_5yr_std_shock (ajustado)
+has_vol_gdp <- "vol_5yr_std_gdp" %in% names(df_dyn21)
+
+res21 <- map(0:12, function(h) {
+  dep_var <- paste0("cumF", h, "_dlog_capital")
+  rhs_terms <- c(
+    if (has_vol_gdp) "vol_5yr_std_gdp",
+    "vol_5yr_std_shock",
+    controls21_terms
+  )
+  fml_str <- paste0(
+    dep_var, " ~ ",
+    paste(rhs_terms, collapse = " + "),
+    " | name + Country"
+  )
+  feols(
+    as.formula(fml_str),
+    data    = df_dyn21,
+    cluster = ~ name + Country
+  )
+})
+
+# 8) Extraer coeficientes y errores estándar
+tbl21 <- tibble(
+  horizon        = 0:12,
+  beta_vol_shock = map_dbl(res21, ~ coef(.x)["vol_5yr_std_shock"]),
+  se_vol_shock   = map_dbl(res21, ~ sqrt(vcov(.x)["vol_5yr_std_shock","vol_5yr_std_shock"]))
+)
+
+# Ahora puedes graficar tbl21 sin errores
+
+
+# 9) Gráfico con leyenda
+plot21 <- tbl21 %>%
+  mutate(Serie="Volatilidad 5y × Shock") %>%
+  ggplot(aes(x=horizon,y=beta_vol_shock,color=Serie,fill=Serie)) +
+  geom_line(size=1) +
+  geom_ribbon(aes(ymin=beta_vol_shock-1.96*se_vol_shock,ymax=beta_vol_shock+1.96*se_vol_shock),alpha=0.2) +
+  scale_color_manual(values=c("Volatilidad 5y × Shock"="purple"), name="Serie") +
+  scale_fill_manual(values=c("Volatilidad 5y × Shock"="purple"), name="Serie") +
+  labs(title="Figura 21: Volatilidad 5‑Year × Shock", x="Horizonte", y="Efecto acumulado de inversión") +
+  scale_x_continuous(breaks=0:12) + theme_minimal()
+
+print(plot21)
+
+
+
+# ------------------------------------------------------------
+# Figura 22 (adaptada): Dinámica Conjunta de Posición Financiera y Volatilidad 5-Year
+# (toda la muestra, h = 0…12)
+# ------------------------------------------------------------
+
+df_cntl22 <- df
+
+# 1) dlog_capital y Ldl_capital
+if (!all(c("dlog_capital","Ldl_capital") %in% names(df_cntl22))) {
+  df_cntl22 <- df_cntl22 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      capital2     = if_else(!is.na(capital)&capital>0, capital, NA_real_),
+      log_capital  = log(capital2),
+      dlog_capital = log_capital - lag(log_capital),
+      Ldl_capital  = lag(dlog_capital)
+    ) %>% ungroup() %>% select(-capital2,-log_capital)
+} else message("dlog_capital y Ldl_capital ya existen; omitiendo.")
+
+# 2) Controles firm-level
+if (!"rsales_g_std" %in% names(df_cntl22)) {
+  df_cntl22 <- df_cntl22 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      rsales_g     = log(saleq) - log(lag(saleq)),
+      rsales_g_std = (rsales_g - mean(rsales_g,na.rm=TRUE))/sd(rsales_g,na.rm=TRUE)
+    ) %>% ungroup() %>% select(-rsales_g)
+} else message("rsales_g_std ya existe; omitiendo.")
+if (!"liq_std" %in% names(df_cntl22)) {
+  df_cntl22 <- df_cntl22 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(liq_std = (current_ratio - mean(current_ratio,na.rm=TRUE))/sd(current_ratio,na.rm=TRUE)) %>% ungroup()
+} else message("liq_std ya existe; omitiendo.")
+if (!all(c("lev_std","dd_std") %in% names(df_cntl22))) {
+  df_cntl22 <- df_cntl22 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      lev_std = (leverage - mean(leverage,na.rm=TRUE))/sd(leverage,na.rm=TRUE),
+      dd_std  = (dd        - mean(dd,       na.rm=TRUE))/sd(dd,       na.rm=TRUE)
+    ) %>% ungroup()
+} else message("lev_std y dd_std ya existen; omitiendo.")
+
+# 3) Volatilidad 5-Year
+if (!"vol_5yr_std" %in% names(df_cntl22)) {
+  df_cntl22 <- df_cntl22 %>% group_by(name) %>% arrange(dateq) %>%
+    mutate(
+      yoy_sales    = log(saleq) - lag(log(saleq),4),
+      vol_5yr      = zoo::rollapply(yoy_sales,20,sd,na.rm=TRUE,fill=NA,align="right"),
+      vol_5yr_std  = (vol_5yr - mean(vol_5yr,na.rm=TRUE))/sd(vol_5yr,na.rm=TRUE)
+    ) %>% ungroup() %>% select(-yoy_sales,-vol_5yr)
+} else message("vol_5yr_std ya existe; omitiendo.")
+
+
+# 4) Interacciones necesarias (ajustado)
+# ---------------------------------------
+# Solo creamos cada interacción si la(s) variable(s) base existen
+
+# (a) Interacciones con dlog_gdp
+if ("dlog_gdp" %in% names(df_cntl22)) {
+  df_cntl22 <- df_cntl22 %>%
+    mutate(
+      vol_5yr_std_gdp = if (!"vol_5yr_std_gdp" %in% names(.)) vol_5yr_std * dlog_gdp else vol_5yr_std_gdp
+    )
+} else {
+  warning("No existe 'dlog_gdp'; se omiten interacciones vol_5yr_std_gdp.")
+}
+
+# (b) Interacciones con shock
+if ("shock" %in% names(df_cntl22)) {
+  df_cntl22 <- df_cntl22 %>%
+    mutate(
+      vol_5yr_std_shock  = if (!"vol_5yr_std_shock"  %in% names(.)) vol_5yr_std * shock  else vol_5yr_std_shock,
+      lev_wins_std_shock = if (!"lev_wins_std_shock" %in% names(.)) lev_std   * shock  else lev_wins_std_shock,
+      dd_wins_std_shock  = if (!"dd_wins_std_shock"  %in% names(.)) dd_std    * shock  else dd_wins_std_shock
+    )
+} else {
+  stop("Falta la variable 'shock'; no se pueden crear interacciones con shock.")
+}
+
+
+
+# 5) Dinámicas acumuladas
+vars22 <- paste0("cumF",0:12,"_dlog_capital")
+if (!all(vars22 %in% names(df_cntl22))) {
+  df_dyn22 <- df_cntl22 %>% group_by(name) %>% arrange(dateq) %>%
+    group_modify(~{tmp<-.x;for(h in 0:12) tmp[[paste0("cumF",h,"_dlog_capital")]]<-rowSums(map_dfc(0:h,~lead(tmp$dlog_capital,.x)),na.rm=TRUE);tmp})%>%ungroup()
+} else { message("Variables dinámicas ya existen; omitiendo."); df_dyn22<-df_cntl22 }
+
+# 6) Definir controles firm-level y macro (solo los macro presentes)
+controls_firm22  <- c("rsales_g_std", "liq_std", "Ldl_capital")
+controls_macro22 <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+
+present_macro22 <- intersect(controls_macro22, names(df_dyn22))
+if (length(present_macro22) < length(controls_macro22)) {
+  warning(
+    "Faltan controles macro: ",
+    paste(setdiff(controls_macro22, present_macro22), collapse = ", "),
+    ". Se omitirán."
+  )
+}
+
+auto_controls22 <- paste(c(controls_firm22, present_macro22), collapse = " + ")
+
+# 7a) Modelos DD & Vol 5y (ajustado)
+res_dd22 <- map(0:12, function(h) {
+  dep_var <- paste0("cumF", h, "_dlog_capital")
+  fml_str <- paste0(
+    dep_var,
+    " ~ dd_wins_std_shock + vol_5yr_std_shock + ",
+    auto_controls22,
+    " | name + Country"
+  )
+  feols(
+    as.formula(fml_str),
+    data    = df_dyn22,
+    cluster = ~ name + Country
+  )
+})
+
+# 7b) Modelos Leverage & Vol 5y (ajustado)
+res_lev22 <- map(0:12, function(h) {
+  dep_var <- paste0("cumF", h, "_dlog_capital")
+  fml_str <- paste0(
+    dep_var,
+    " ~ lev_wins_std_shock + vol_5yr_std_shock + ",
+    auto_controls22,
+    " | name + Country"
+  )
+  feols(
+    as.formula(fml_str),
+    data    = df_dyn22,
+    cluster = ~ name + Country
+  )
+})
+
+
+# 8) Extraer coefs
+tbl_dd22 <- tibble(
+  horizon   = 0:12,
+  beta_dd   = map_dbl(res_dd22, ~coef(.x)["dd_wins_std_shock"]),
+  se_dd     = map_dbl(res_dd22, ~sqrt(vcov(.x)["dd_wins_std_shock","dd_wins_std_shock"])),
+  beta_vol  = map_dbl(res_dd22, ~coef(.x)["vol_5yr_std_shock"]),
+  se_vol    = map_dbl(res_dd22, ~sqrt(vcov(.x)["vol_5yr_std_shock","vol_5yr_std_shock"]))
+)
+tbl_lev22 <- tibble(
   horizon     = 0:12,
-  beta_cash   = map_dbl(models_dd_liq, ~ coef(.x)["cash_mps"]),
-  se_cash     = map_dbl(models_dd_liq, ~ sqrt(vcov(.x)["cash_mps", "cash_mps"])),
-  beta_highc  = map_dbl(models_dd_liq, ~ coef(.x)["highcash_mps"]),
-  se_highc    = map_dbl(models_dd_liq, ~ sqrt(vcov(.x)["highcash_mps", "highcash_mps"])),
-  beta_dd     = map_dbl(models_dd_liq, ~ coef(.x)["dd_mps"]),
-  se_dd       = map_dbl(models_dd_liq, ~ sqrt(vcov(.x)["dd_mps", "dd_mps"]))
+  beta_lev    = map_dbl(res_lev22, ~coef(.x)["lev_wins_std_shock"]),
+  se_lev      = map_dbl(res_lev22, ~sqrt(vcov(.x)["lev_wins_std_shock","lev_wins_std_shock"])),
+  beta_vol    = map_dbl(res_lev22, ~coef(.x)["vol_5yr_std_shock"]),
+  se_vol      = map_dbl(res_lev22, ~sqrt(vcov(.x)["vol_5yr_std_shock","vol_5yr_std_shock"]))
 )
 
-cat("\nFigura 13(b): Dynamics – DD & Liquidez\n")
-print(coefs_dd_liq)
+# 9a) Gráfico DD & Volatilidad
+long_dd22 <- tbl_dd22 %>% select(horizon, DD=beta_dd, Vol=beta_vol) %>% pivot_longer(-horizon,names_to="serie",values_to="beta")
+se_dd22   <- tbl_dd22 %>% select(horizon, DD=se_dd, Vol=se_vol)     %>% pivot_longer(-horizon,names_to="serie",values_to="se")
+dd22_plot <- left_join(long_dd22,se_dd22,by=c("horizon","serie"))
 
-# ------------------------------------------------------------
-# 12) Graficar respuestas dinámicas combinadas:
-#    - cash_mps (línea azul), highcash_mps (línea naranja punteada)
-#    - dd_mps (línea verde)
-# ------------------------------------------------------------
-p_dd_liq <- ggplot(coefs_dd_liq, aes(x = horizon)) +
-  # Interacción cash_mps (liquidez continua x mps)
-  geom_line(aes(y = beta_cash), size = 1, color = "blue") +
-  geom_ribbon(aes(ymin = beta_cash - 1.96 * se_cash,
-                  ymax = beta_cash + 1.96 * se_cash),
-              fill = "blue", alpha = 0.2) +
-  # Interacción highcash_mps (liquidez dummy x mps)
-  geom_line(aes(y = beta_highc), size = 1, linetype = "dashed", color = "orange") +
-  geom_ribbon(aes(ymin = beta_highc - 1.96 * se_highc,
-                  ymax = beta_highc + 1.96 * se_highc),
-              fill = "orange", alpha = 0.2) +
-  # Interacción dd_mps (distance-to-default x mps)
-  geom_line(aes(y = beta_dd), size = 1, color = "darkgreen") +
-  geom_ribbon(aes(ymin = beta_dd - 1.96 * se_dd,
-                  ymax = beta_dd + 1.96 * se_dd),
-              fill = "darkgreen", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title    = "Figura 13(b): Joint Dynamics – Liquidez (blue/orange) y DD (verde)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x        = "Horizonte (trimestres)",
-    y        = "Coeficiente acumulado"
-  ) +
+p22a <- ggplot(dd22_plot,aes(x=horizon,y=beta,color=serie,fill=serie))+
+  geom_line(size=1)+geom_ribbon(aes(ymin=beta-1.96*se,ymax=beta+1.96*se),alpha=0.2)+
+  scale_color_manual(values=c("DD"="red","Vol"="blue"),name="Serie")+
+  scale_fill_manual(values=c("DD"="red","Vol"="blue"),name="Serie")+
+  labs(title="Figura 22(a): DD vs Volatilidad 5y",x="Horizonte",y="Efecto acumulado de inversión")+
   theme_minimal()
-print(p_dd_liq)
 
-# ------------------------------------------------------------
-# Fin del script para Figura 13 adaptada (Leverage/DD y Liquidez)
-# ------------------------------------------------------------
+# 9b) Gráfico Leverage & Volatilidad
+long_lev22 <- tbl_lev22 %>% select(horizon, Lev=beta_lev, Vol=beta_vol) %>% pivot_longer(-horizon,names_to="serie",values_to="beta")
+se_lev22   <- tbl_lev22 %>% select(horizon, Lev=se_lev, Vol=se_vol)     %>% pivot_longer(-horizon,names_to="serie",values_to="se")
+lev22_plot <- left_join(long_lev22,se_lev22,by=c("horizon","serie"))
 
-
-
-# *******************************************************************************
-# Figura 14: Joint Dynamics en Posición Financiera (Leverage o DD) y Edad
-# (Se usa TODA la muestra, sin recortes de periodos antiguos)
-# *******************************************************************************
-
-# 0) Cargar librerías necesarias
-# Si falta alguna, instálala con:
-# install.packages(c("haven","zoo","dplyr","tidyr","purrr","fixest","ggplot2"))
-library(haven)     # read_dta()
-library(zoo)       # as.yearqtr()
-library(dplyr)     # Manipulación de datos
-library(tidyr)     # replace_na()
-library(purrr)     # map(), map_dfc()
-library(fixest)    # feols()
-library(ggplot2)   # Graficar
-
-# ------------------------------------------------------------
-# 1) Leer el panel “construct_panel_data_final.dta” (incluye variables de edad)
-# ------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),   # convierte a trimestral
-    quarter = as.factor(dateq)     # (opcional) factor para trimestre
-  ) %>%
-  arrange(name, dateq)
-
-
-
-
-
-
-# *******************************************************************************
-# Figura 14: Joint Dynamics en Posición Financiera (Leverage o DD) y Edad
-# (Usando TODA la muestra, sin recortes de periodos antiguos ni Gran Depresión)
-# *******************************************************************************
-
-# 0) Cargar librerías necesarias
-library(haven)     # read_dta()
-library(zoo)       # as.yearqtr()
-library(dplyr)     # Manipulaciones de datos
-library(tidyr)     # replace_na()
-library(purrr)     # map(), map_dfc()
-library(fixest)    # feols()
-library(ggplot2)   # Graficar
-
-# ------------------------------------------------------------
-# 1) Leer el panel “construct_panel_data_final.dta”
-# ------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),   # convierte la variable `dateq` a trimestral
-    quarter = as.factor(dateq)     # (opcional) factor para trimestre
-  ) %>%
-  arrange(name, dateq)
-
-# ------------------------------------------------------------
-# 2) Preprocesar variables firm‐level:
-#    - dlog_capital, Ldl_capital
-#    - rsales_g_std (crecimiento ventas estandarizado)
-#    - lev_std, dd_std (apalancamiento y DD estandarizados)
-#    - Construir dummies de edad: AgeMiddle / AgeOld
-# ------------------------------------------------------------
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) Evitar log(0) en “capital”
-    capital2     = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    log_capital  = log(capital2),
-    lag_log_cap  = lag(log_capital),
-    dlog_capital = log_capital - lag_log_cap,
-    Ldl_capital  = lag(dlog_capital, 1),
-    
-    # 2.2) Crecimiento de ventas para control
-    saleq2       = if_else(!is.na(saleq) & saleq > 0, saleq, NA_real_),
-    log_sales    = log(saleq2),
-    rsales_g     = log_sales - lag(log_sales),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    
-    # 2.3) Estandarizar apalancamiento y DD
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std  = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    )
-  ) %>%
-  ungroup() %>%
-  # 2.4) Eliminar variables temporales intermedias
-  select(-capital2, -lag_log_cap, -saleq2, -log_sales, -rsales_g)
-
-# ------------------------------------------------------------
-# 3) Construir percentiles de “age_sample” por trimestre y dummies de edad
-#    (AgeMiddle / AgeOld), usando siempre todo el panel
-# ------------------------------------------------------------
-df <- df %>%
-  group_by(dateq) %>%
-  mutate(
-    age_p25   = quantile(age_sample, 0.25, na.rm = TRUE),
-    age_p75   = quantile(age_sample, 0.75, na.rm = TRUE),
-    
-    # 3.1) Dummy AgeMiddle: entre percentil25 y percentil75
-    AgeMiddle = as.numeric(age_sample >= age_p25 & age_sample < age_p75),
-    # 3.2) Dummy AgeOld: en percentil75 o más
-    AgeOld    = as.numeric(age_sample >= age_p75)
-  ) %>%
-  ungroup() %>%
-  # 3.3) No necesitamos conservar age_p25/age_p75 tras construir dummies
-  select(-age_p25, -age_p75)
-
-# ------------------------------------------------------------
-# 4) Crear interacciones financieras y de edad:
-#    - lev_gdp, lev_wide, lev_mps
-#    - dd_gdp,  dd_wide,  dd_mps
-#    - AgeMiddle_gdp, AgeOld_gdp
-#    - AgeMiddle_wide, AgeOld_wide
-# ------------------------------------------------------------
-df <- df %>%
-  mutate(
-    # 4.1) Interacciones de apalancamiento y DD
-    lev_gdp  = lev_std * dlog_gdp,
-    lev_wide = lev_std * mpso,   # shock ortogonalizado
-    lev_mps  = lev_std * mps,    # shock raw
-    dd_gdp   = dd_std  * dlog_gdp,
-    dd_wide  = dd_std  * mpso,
-    dd_mps   = dd_std  * mps,
-    
-    # 4.2) Interacciones de edad
-    AgeMiddle_gdp  = AgeMiddle * dlog_gdp,
-    AgeOld_gdp     = AgeOld    * dlog_gdp,
-    AgeMiddle_wide = AgeMiddle * mpso,
-    AgeOld_wide    = AgeOld    * mpso
-  )
-
-# ------------------------------------------------------------
-# 5) Generar variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-# ------------------------------------------------------------
-df_dyn <- df %>% arrange(name, dateq)
-for (h in 0:12) {
-  colname <- paste0("cumF", h, "_dlog_capital")
-  df_dyn <- df_dyn %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      # Suma acumulada de dlog_capital desde t hasta t+h dentro de cada firma
-      !!colname := rowSums(
-        map_dfc(0:h, ~ lead(dlog_capital, .x)),
-        na.rm = TRUE
-      )
-    ) %>%
-    ungroup()
-}
-
-# ------------------------------------------------------------
-# 6) Reemplazar NA en regresores de RHS por 0
-#    (para no eliminar filas salvo que falte cumFh_dlog_capital)
-# ------------------------------------------------------------
-df_dyn <- df_dyn %>%
-  mutate(
-    across(
-      c(
-        # Controles y rezagos
-        "rsales_g_std", "Ldl_capital",
-        # Interacciones financieras
-        "lev_gdp", "lev_wide", "lev_mps",
-        "dd_gdp",  "dd_wide",  "dd_mps",
-        # Dummies y sus interacciones de edad
-        "AgeMiddle", "AgeOld",
-        "AgeMiddle_gdp", "AgeOld_gdp",
-        "AgeMiddle_wide", "AgeOld_wide"
-      ),
-      ~ replace_na(.x, 0)
-    )
-  )
-
-# ------------------------------------------------------------
-# 7) Definir controles firma‐level y efectos fijos
-#    - Controles de firma: rsales_g_std
-#    - FEs fijos: name (firma) + Country_x (país)
-# ------------------------------------------------------------
-controls_firm <- c("rsales_g_std")
-# En cada fórmula: “| name + Country_x”
-
-# ------------------------------------------------------------
-# 8) (a) Joint Dynamics: Leverage & Edad (h = 0…12)
-#    Especificación:
-#      cumFh_dlog_capital ~
-#        AgeMiddle_gdp + AgeOld_gdp +
-#        AgeMiddle_wide + AgeOld_wide +
-#        AgeMiddle + AgeOld +
-#        lev_gdp + lev_wide + lev_mps +
-#        Ldl_capital + rsales_g_std
-#      | name + Country_x, cluster(~dateq + name)
-# ------------------------------------------------------------
-models_lev_age <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    # Variables de edad
-    "AgeMiddle_gdp + AgeOld_gdp + ",
-    "AgeMiddle_wide + AgeOld_wide + ",
-    "AgeMiddle + AgeOld + ",
-    # Interacciones financieras
-    "lev_gdp + lev_wide + lev_mps + ",
-    # Rezago de inversión y control
-    "Ldl_capital + ", paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_lev_age) <- paste0("m", 0:12)
-
-# ------------------------------------------------------------
-# 9) Extraer coeficientes y errores para:
-#    - AgeMiddle_wide, AgeOld_wide
-#    - lev_wide
-# ------------------------------------------------------------
-coefs_lev_age <- tibble(
-  horizon          = 0:12,
-  beta_mid_wide    = map_dbl(models_lev_age, ~ coef(.x)["AgeMiddle_wide"]),
-  se_mid_wide      = map_dbl(models_lev_age, ~ sqrt(vcov(.x)["AgeMiddle_wide", "AgeMiddle_wide"])),
-  beta_old_wide    = map_dbl(models_lev_age, ~ coef(.x)["AgeOld_wide"]),
-  se_old_wide      = map_dbl(models_lev_age, ~ sqrt(vcov(.x)["AgeOld_wide", "AgeOld_wide"])),
-  beta_lev_wide    = map_dbl(models_lev_age, ~ coef(.x)["lev_wide"]),
-  se_lev_wide      = map_dbl(models_lev_age, ~ sqrt(vcov(.x)["lev_wide", "lev_wide"]))
-)
-
-cat("\nFigura 14(a): Joint Dynamics – Leverage & Edad\n")
-print(coefs_lev_age)
-
-# ------------------------------------------------------------
-# 10) Graficar “AgeMiddle_wide” (azul), “AgeOld_wide” (naranja) y “Leverage × wide” (rojo)
-# ------------------------------------------------------------
-p_lev_age <- ggplot(coefs_lev_age, aes(x = horizon)) +
-  # AgeMiddle_wide
-  geom_line(aes(y = beta_mid_wide), size = 1, color = "blue") +
-  geom_ribbon(aes(ymin = beta_mid_wide - 1.96 * se_mid_wide,
-                  ymax = beta_mid_wide + 1.96 * se_mid_wide),
-              fill = "blue", alpha = 0.2) +
-  # AgeOld_wide
-  geom_line(aes(y = beta_old_wide), size = 1, color = "orange") +
-  geom_ribbon(aes(ymin = beta_old_wide - 1.96 * se_old_wide,
-                  ymax = beta_old_wide + 1.96 * se_old_wide),
-              fill = "orange", alpha = 0.2) +
-  # Leverage × wide
-  geom_line(aes(y = beta_lev_wide), size = 1, color = "red") +
-  geom_ribbon(aes(ymin = beta_lev_wide - 1.96 * se_lev_wide,
-                  ymax = beta_lev_wide + 1.96 * se_lev_wide),
-              fill = "red", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title    = "Figura 14(a): Joint Dynamics – Edad (AgeMiddle_wide azul, AgeOld_wide naranja) y Leverage_wide (rojo)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x        = "Horizonte (trimestres)",
-    y        = "Coeficiente acumulado"
-  ) +
+p22b <- ggplot(lev22_plot,aes(x=horizon,y=beta,color=serie,fill=serie))+
+  geom_line(size=1)+geom_ribbon(aes(ymin=beta-1.96*se,ymax=beta+1.96*se),alpha=0.2)+
+  scale_color_manual(values=c("Lev"="darkgreen","Vol"="blue"),name="Serie")+
+  scale_fill_manual(values=c("Lev"="darkgreen","Vol"="blue"),name="Serie")+
+  labs(title="Figura 22(b): Leverage vs Volatilidad 5y",x="Horizonte",y="Efecto acumulado de inversión")+
   theme_minimal()
-print(p_lev_age)
 
-# ------------------------------------------------------------
-# 11) (b) Joint Dynamics: DD & Edad (h = 0…12)
-#     Especificación:
-#       cumFh_dlog_capital ~
-#         AgeMiddle_gdp + AgeOld_gdp +
-#         AgeMiddle_wide + AgeOld_wide +
-#         AgeMiddle + AgeOld +
-#         dd_gdp + dd_wide + dd_mps +
-#         Ldl_capital + rsales_g_std
-#       | name + Country_x, cluster(~dateq + name)
-# ------------------------------------------------------------
-models_dd_age <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    # Edad
-    "AgeMiddle_gdp + AgeOld_gdp + ",
-    "AgeMiddle_wide + AgeOld_wide + ",
-    "AgeMiddle + AgeOld + ",
-    # DD
-    "dd_gdp + dd_wide + dd_mps + ",
-    # Rezago y control
-    "Ldl_capital + ", paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_dd_age) <- paste0("m", 0:12)
+# 10) Mostrar ambos
+graph22 <- p22a / p22b + plot_annotation(title="Figura 22: Posición Financiera y Volatilidad 5-Year")
+print(graph22)
 
-# ------------------------------------------------------------
-# 12) Extraer coeficientes y errores para:
-#    - AgeMiddle_wide, AgeOld_wide
-#    - dd_wide
-# ------------------------------------------------------------
-coefs_dd_age <- tibble(
-  horizon          = 0:12,
-  beta_mid_wide    = map_dbl(models_dd_age, ~ coef(.x)["AgeMiddle_wide"]),
-  se_mid_wide      = map_dbl(models_dd_age, ~ sqrt(vcov(.x)["AgeMiddle_wide", "AgeMiddle_wide"])),
-  beta_old_wide    = map_dbl(models_dd_age, ~ coef(.x)["AgeOld_wide"]),
-  se_old_wide      = map_dbl(models_dd_age, ~ sqrt(vcov(.x)["AgeOld_wide", "AgeOld_wide"])),
-  beta_dd_wide     = map_dbl(models_dd_age, ~ coef(.x)["dd_wide"]),
-  se_dd_wide       = map_dbl(models_dd_age, ~ sqrt(vcov(.x)["dd_wide", "dd_wide"]))
-)
 
-cat("\nFigura 14(b): Joint Dynamics – DD & Edad\n")
-print(coefs_dd_age)
 
-# ------------------------------------------------------------
-# 13) Graficar “AgeMiddle_wide” (azul), “AgeOld_wide” (naranja) y “DD × wide” (verde)
-# ------------------------------------------------------------
-p_dd_age <- ggplot(coefs_dd_age, aes(x = horizon)) +
-  # AgeMiddle_wide
-  geom_line(aes(y = beta_mid_wide), size = 1, color = "blue") +
-  geom_ribbon(aes(ymin = beta_mid_wide - 1.96 * se_mid_wide,
-                  ymax = beta_mid_wide + 1.96 * se_mid_wide),
-              fill = "blue", alpha = 0.2) +
-  # AgeOld_wide
-  geom_line(aes(y = beta_old_wide), size = 1, color = "orange") +
-  geom_ribbon(aes(ymin = beta_old_wide - 1.96 * se_old_wide,
-                  ymax = beta_old_wide + 1.96 * se_old_wide),
-              fill = "orange", alpha = 0.2) +
-  # DD × wide (verde)
-  geom_line(aes(y = beta_dd_wide), size = 1, color = "darkgreen") +
-  geom_ribbon(aes(ymin = beta_dd_wide - 1.96 * se_dd_wide,
-                  ymax = beta_dd_wide + 1.96 * se_dd_wide),
-              fill = "darkgreen", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title    = "Figura 14(b): Joint Dynamics – Edad (AgeMiddle_wide azul, AgeOld_wide naranja) y DD_wide (verde)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x        = "Horizonte (trimestres)",
-    y        = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-print(p_dd_age)
-
-# ------------------------------------------------------------
-# Fin del script para Figura 14 (Leverage/DD y Edad)
-# ------------------------------------------------------------
-
-
-
-
-
-# *******************************************************************************
-# Figura 16: Joint Dynamics en Posición Financiera (Leverage o DD) y Liquidez
-# (Usando TODO el panel sin recortes de periodos antiguos)
-# *******************************************************************************
-
-# 0) Cargar librerías necesarias
-#    Si falta alguna, instalar con: install.packages(c("haven","zoo","dplyr","tidyr","purrr","fixest","ggplot2"))
-library(haven)     # read_dta()
-library(zoo)       # as.yearqtr()
-library(dplyr)     # Manipulación de datos
-library(tidyr)     # replace_na()
-library(purrr)     # map(), map_dfc()
-library(fixest)    # feols()
-library(ggplot2)   # Graficar
-
-# ------------------------------------------------------------
-# 1) Leer el panel “construct_panel_data_final.dta”
-#    (asegúrate de que incluye “current_ratio” para liquidez)
-# ------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq   = as.yearqtr(dateq),   # convierte a trimestral
-    quarter = as.factor(dateq)     # (opcional) factor para trimestre
-  ) %>%
-  arrange(name, dateq)
-
-# ------------------------------------------------------------
-# 2) Preprocesar variables firm‐level:
-#    - dlog_capital, Ldl_capital
-#    - rsales_g_std  (crecimiento de ventas estandarizado)
-#    - lev_std, dd_std  (apalancamiento y DD estandarizados)
-#    - liq_std = current_ratio estandarizada
-# ------------------------------------------------------------
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) Evitar log(0) en “capital”
-    capital2     = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    log_capital  = log(capital2),
-    lag_log_cap  = lag(log_capital),
-    dlog_capital = log_capital - lag_log_cap,
-    Ldl_capital  = lag(dlog_capital, 1),
-    
-    # 2.2) Crecimiento de ventas para rsales_g_std
-    saleq2       = if_else(!is.na(saleq) & saleq > 0, saleq, NA_real_),
-    log_sales    = log(saleq2),
-    rsales_g     = log_sales - lag(log_sales),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    
-    # 2.3) Estandarizar apalancamiento y DD
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std  = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.4) Estandarizar liquidez a partir de current_ratio
-    liq_std = if_else(
-      !is.na(current_ratio),
-      (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE),
-      NA_real_
-    )
-  ) %>%
-  ungroup() %>%
-  # 2.5) Eliminar variables temporales intermedias
-  select(-capital2, -lag_log_cap, -saleq2, -log_sales, -rsales_g)
-
-# ------------------------------------------------------------
-# 3) Crear interacciones financieras y de liquidez:
-#    - Leverage:   lev_gdp, lev_wide, lev_mps
-#    - DD:         dd_gdp, dd_wide, dd_mps
-#    - Liquidez:   liq_gdp = liq_std × dlog_gdp
-#                  liq_wide = liq_std × mpso
-#                  liq_mps  = liq_std × mps
-# ------------------------------------------------------------
-df <- df %>%
-  mutate(
-    # 3.1) Interacciones de apalancamiento
-    lev_gdp   = lev_std * dlog_gdp,
-    lev_wide  = lev_std * mpso,    # choque ortogonalizado
-    lev_mps   = lev_std * mps,     # choque raw
-    
-    # 3.2) Interacciones de DD
-    dd_gdp    = dd_std  * dlog_gdp,
-    dd_wide   = dd_std  * mpso,
-    dd_mps    = dd_std  * mps,
-    
-    # 3.3) Interacciones de liquidez
-    liq_gdp   = liq_std * dlog_gdp,
-    liq_wide  = liq_std * mpso,
-    liq_mps   = liq_std * mps
-  )
-
-# ------------------------------------------------------------
-# 4) Generar variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-# ------------------------------------------------------------
-df_dyn <- df %>% arrange(name, dateq)
-for (h in 0:12) {
-  new_col <- paste0("cumF", h, "_dlog_capital")
-  df_dyn <- df_dyn %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      # Suma acumulada de dlog_capital desde t hasta t+h
-      !!new_col := rowSums(
-        map_dfc(0:h, ~ lead(dlog_capital, .x)),
-        na.rm = TRUE
-      )
-    ) %>%
-    ungroup()
-}
-
-# ------------------------------------------------------------
-# 5) Reemplazar NA en regresores de RHS por 0
-#    (para no eliminar filas salvo que falte cumFh_dlog_capital)
-# ------------------------------------------------------------
-df_dyn <- df_dyn %>%
-  mutate(
-    across(
-      c(
-        # Controles y rezagos
-        "rsales_g_std", "Ldl_capital",
-        # Interacciones leverage
-        "lev_gdp",   "lev_wide",   "lev_mps",
-        # Interacciones DD
-        "dd_gdp",    "dd_wide",    "dd_mps",
-        # Interacciones liquidez
-        "liq_std",   "liq_gdp",    "liq_wide",   "liq_mps"
-      ),
-      ~ replace_na(.x, 0)
-    )
-  )
-
-# ------------------------------------------------------------
-# 6) Definir controles firma‐level y efectos fijos
-#    - Controles: rsales_g_std
-#    - Efectos fijos: name (firma) + Country_x (país)
-# ------------------------------------------------------------
-controls_firm <- c("rsales_g_std")
-# En cada fórmula: “| name + Country_x”
-
-# ------------------------------------------------------------
-# 7) (a) Joint Dynamics: Leverage & Liquidez (h = 0…12)
-#    Especificación:
-#      cumFh_dlog_capital ~
-#        lev_gdp  + lev_wide  + lev_mps  +
-#        liq_gdp  + liq_wide  + liq_mps  +
-#        Ldl_capital + rsales_g_std
-#      | name + Country_x, cluster(~dateq + name)
-# ------------------------------------------------------------
-models_lev_liq <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    # Interacciones leverage
-    "lev_gdp + lev_wide + lev_mps + ",
-    # Interacciones liquidez
-    "liq_gdp + liq_wide + liq_mps + ",
-    # Rezago y control
-    "Ldl_capital + ", paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_lev_liq) <- paste0("m", 0:12)
-
-# ------------------------------------------------------------
-# 8) Extraer coeficientes y errores de:
-#    • lev_wide   (Leverage × mpso)
-#    • liq_wide   (Liquidez × mpso)
-# ------------------------------------------------------------
-coefs_lev_liq <- tibble(
-  horizon         = 0:12,
-  beta_lev_wide   = map_dbl(models_lev_liq, ~ coef(.x)["lev_wide"]),
-  se_lev_wide     = map_dbl(models_lev_liq, ~ sqrt(vcov(.x)["lev_wide", "lev_wide"])),
-  beta_liq_wide   = map_dbl(models_lev_liq, ~ coef(.x)["liq_wide"]),
-  se_liq_wide     = map_dbl(models_lev_liq, ~ sqrt(vcov(.x)["liq_wide", "liq_wide"]))
-)
-
-cat("\nFigura 16(a): Joint Dynamics – Leverage & Liquidez\n")
-print(coefs_lev_liq)
-
-# ------------------------------------------------------------
-# 9) Graficar coeficientes sobre “lev_wide” (rojo) y “liq_wide” (azul)
-# ------------------------------------------------------------
-p_lev_liq <- ggplot(coefs_lev_liq, aes(x = horizon)) +
-  # Leverage × wide (rojo)
-  geom_line(aes(y = beta_lev_wide), size = 1, color = "red") +
-  geom_ribbon(aes(ymin = beta_lev_wide - 1.96 * se_lev_wide,
-                  ymax = beta_lev_wide + 1.96 * se_lev_wide),
-              fill = "red", alpha = 0.2) +
-  # Liquidez × wide (azul)
-  geom_line(aes(y = beta_liq_wide), size = 1, color = "blue") +
-  geom_ribbon(aes(ymin = beta_liq_wide - 1.96 * se_liq_wide,
-                  ymax = beta_liq_wide + 1.96 * se_liq_wide),
-              fill = "blue", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title    = "Figura 16(a): Joint Dynamics – Leverage (rojo) y Liquidez (azul)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x        = "Horizonte (trimestres)",
-    y        = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-print(p_lev_liq)
-
-# ------------------------------------------------------------
-# 10) (b) Joint Dynamics: DD & Liquidez (h = 0…12)
-#     Especificación:
-#       cumFh_dlog_capital ~
-#         dd_gdp  + dd_wide  + dd_mps  +
-#         liq_gdp + liq_wide + liq_mps +
-#         Ldl_capital + rsales_g_std
-#       | name + Country_x, cluster(~dateq + name)
-# ------------------------------------------------------------
-models_dd_liq <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    # Interacciones DD
-    "dd_gdp + dd_wide + dd_mps + ",
-    # Interacciones liquidez
-    "liq_gdp + liq_wide + liq_mps + ",
-    # Rezago y control
-    "Ldl_capital + ", paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_dd_liq) <- paste0("m", 0:12)
-
-# ------------------------------------------------------------
-# 11) Extraer coeficientes y errores de:
-#    • dd_wide   (DD × mpso)
-#    • liq_wide  (Liquidez × mpso)
-# ------------------------------------------------------------
-coefs_dd_liq <- tibble(
-  horizon         = 0:12,
-  beta_dd_wide    = map_dbl(models_dd_liq, ~ coef(.x)["dd_wide"]),
-  se_dd_wide      = map_dbl(models_dd_liq, ~ sqrt(vcov(.x)["dd_wide", "dd_wide"])),
-  beta_liq_wide   = map_dbl(models_dd_liq, ~ coef(.x)["liq_wide"]),
-  se_liq_wide     = map_dbl(models_dd_liq, ~ sqrt(vcov(.x)["liq_wide", "liq_wide"]))
-)
-
-cat("\nFigura 16(b): Joint Dynamics – DD & Liquidez\n")
-print(coefs_dd_liq)
-
-# ------------------------------------------------------------
-# 12) Graficar coeficientes sobre “dd_wide” (verde) y “liq_wide” (azul)
-# ------------------------------------------------------------
-p_dd_liq <- ggplot(coefs_dd_liq, aes(x = horizon)) +
-  # DD × wide (verde)
-  geom_line(aes(y = beta_dd_wide), size = 1, color = "darkgreen") +
-  geom_ribbon(aes(ymin = beta_dd_wide - 1.96 * se_dd_wide,
-                  ymax = beta_dd_wide + 1.96 * se_dd_wide),
-              fill = "darkgreen", alpha = 0.2) +
-  # Liquidez × wide (azul)
-  geom_line(aes(y = beta_liq_wide), size = 1, color = "blue") +
-  geom_ribbon(aes(ymin = beta_liq_wide - 1.96 * se_liq_wide,
-                  ymax = beta_liq_wide + 1.96 * se_liq_wide),
-              fill = "blue", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title    = "Figura 16(b): Joint Dynamics – DD (verde) y Liquidez (azul)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x        = "Horizonte (trimestres)",
-    y        = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-print(p_dd_liq)
-
-# ------------------------------------------------------------
-# Fin del script para Figura 16 (Leverage/DD y Liquidez)
-# ------------------------------------------------------------
-
-
-
-
-
-
-# *******************************************************************************
-# Figura 21: Dinámicas de las Respuestas Diferenciales a Choques Monetarios por Volatilidad
-#*******************************************************************************
-
-# *******************************************************************************
-# Figura 21: Dinámica de la Respuesta Diferencial a Choques Monetarios por Volatilidad (5‐Year ÚNICAMENTE)
-# (Usando TODO el panel sin recortes de periodos antiguos)
-#*******************************************************************************
-
-### DEBE SER A 5 AÑOS DE VOLATILIDAD Y 10, SI NO SE PUEDE A 10, A 7.
-
-
-# 0) Cargar librerías necesarias
-#    (Instalar si hiciera falta: haven, zoo, dplyr, tidyr, purrr, fixest, ggplot2)
-library(haven)     # read_dta()
-library(zoo)       # as.yearqtr(), rollapply()
-library(dplyr)     # Manipulación de datos
-library(tidyr)     # replace_na()
-library(purrr)     # map(), map_dfc()
-library(fixest)    # feols()
-library(ggplot2)   # Graficar
-
-# --------------------------------------------------------------------------------
-# 1) Leer el panel “Data_Base_final.dta”
-#    (asegúrate de que contiene: current_ratio, saleq, leverage, dd, dlog_gdp, mpso, mps)
-# --------------------------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(
-    dateq = as.yearqtr(dateq)
-  ) %>%
-  arrange(name, dateq)
-
-# --------------------------------------------------------------------------------
-# 2) Preprocesar variables firm‐level:
-#    - dlog_capital y Ldl_capital
-#    - rsales_g_std  (crecimiento de ventas estandarizado)
-#    - lev_std, dd_std  (apalancamiento y DD estandarizados)
-#    - liq_std  (liquidez estandarizada a partir de current_ratio)
-#    - Crear “yoy_sales” = Δ log(saleq) año‐año
-#    - Calcular volatilidad de ventas 5‐Year:
-#          • vol_5yr  = sd de yoy_sales en ventana móvil de 20 trimestres (5 años)
-#      Luego estandarizar vol_5yr dentro de cada firma.
-# --------------------------------------------------------------------------------
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) Evitar log(0) en “capital”
-    capital2     = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    log_capital  = log(capital2),
-    lag_log_cap  = lag(log_capital),
-    dlog_capital = log_capital - lag_log_cap,
-    Ldl_capital  = lag(dlog_capital, 1),
-    
-    # 2.2) Crecimiento de ventas para rsales_g_std
-    saleq2       = if_else(!is.na(saleq) & saleq > 0, saleq, NA_real_),
-    log_sales    = log(saleq2),
-    rsales_g     = log_sales - lag(log_sales),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    
-    # 2.3) Estandarizar apalancamiento y DD
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std  = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.4) Estandarizar liquidez a partir de current_ratio
-    liq_std = if_else(
-      !is.na(current_ratio),
-      (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.5) Preparar “yoy_sales” = Δ log(saleq) año‐año
-    yoy_sales = if_else(
-      !is.na(log_sales) & !is.na(lag(log_sales, 4)),
-      log_sales - lag(log_sales, 4),
-      NA_real_
-    )
-  ) %>%
-  ungroup() %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.6) Volatilidad 5‐Year: sd de yoy_sales en ventana móvil de 20 trimestres
-    vol_5yr = zoo::rollapply(
-      data  = yoy_sales,
-      width = 20,
-      FUN   = function(x) sd(x, na.rm = TRUE),
-      align = "right",
-      fill  = NA
-    ),
-    
-    # 2.7) Estandarizar vol_5yr dentro de cada firma
-    vol_5yr_std = (vol_5yr - mean(vol_5yr, na.rm = TRUE)) / sd(vol_5yr, na.rm = TRUE)
-  ) %>%
-  ungroup() %>%
-  # 2.8) Eliminar variables intermedias que ya no necesitamos
-  select(-capital2, -lag_log_cap, -saleq2, -log_sales, -rsales_g, -yoy_sales)
-
-# --------------------------------------------------------------------------------
-# 3) Crear interacciones de volatilidad 5‐Year con choques monetarios:
-#      • vol_5yr_std_gdp  = vol_5yr_std × dlog_gdp
-#      • vol_5yr_std_wide = vol_5yr_std × mpso
-#      • vol_5yr_std_mps  = vol_5yr_std × mps
-# --------------------------------------------------------------------------------
-df <- df %>%
-  mutate(
-    vol_5yr_std_gdp  = vol_5yr_std * dlog_gdp,
-    vol_5yr_std_wide = vol_5yr_std * mpso,
-    vol_5yr_std_mps  = vol_5yr_std * mps
-  )
-
-# --------------------------------------------------------------------------------
-# 4) Generar variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-#    (local projections dentro de cada firma)
-# --------------------------------------------------------------------------------
-df_dyn <- df %>% arrange(name, dateq)
-for (h in 0:12) {
-  new_col <- paste0("cumF", h, "_dlog_capital")
-  df_dyn <- df_dyn %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      !!new_col := rowSums(
-        map_dfc(0:h, ~ lead(dlog_capital, .x)),
-        na.rm = TRUE
-      )
-    ) %>%
-    ungroup()
-}
-
-# --------------------------------------------------------------------------------
-# 5) Reemplazar NA en regresores de RHS por 0
-#    (para conservar filas a menos que falte cumFh_dlog_capital)
-# --------------------------------------------------------------------------------
-df_dyn <- df_dyn %>%
-  mutate(
-    across(
-      c(
-        "rsales_g_std", "Ldl_capital",
-        "vol_5yr_std_gdp", "vol_5yr_std_wide", "vol_5yr_std_mps"
-      ),
-      ~ replace_na(.x, 0)
-    )
-  )
-
-# --------------------------------------------------------------------------------
-# 6) Definir controles firma‐level (sin size):
-#      – “rsales_g_std” y “liq_std”
-#    Efectos fijos: name + Country_x
-# --------------------------------------------------------------------------------
-controls_firm_nosize <- c("rsales_g_std", "liq_std")
-
-# --------------------------------------------------------------------------------
-# 7) Dinámica 5‐Year: bucle h = 0…12
-#      Especificación:
-#        cumFh_dlog_capital ~
-#          vol_5yr_std_gdp + vol_5yr_std_wide + vol_5yr_std_mps +
-#          rsales_g_std + liq_std
-#        | name + Country_x, cluster(~dateq + name)
-# --------------------------------------------------------------------------------
-models_vol_5yr <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "vol_5yr_std_gdp + vol_5yr_std_wide + vol_5yr_std_mps + ",
-    paste(controls_firm_nosize, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_vol_5yr) <- paste0("m", 0:12)
-
-# --------------------------------------------------------------------------------
-# 8) Extraer coeficiente y error estándar de “vol_5yr_std_wide”
-# --------------------------------------------------------------------------------
-coefs_vol_5yr <- tibble(
-  horizon           = 0:12,
-  beta_vol_5yr_wide = map_dbl(models_vol_5yr, function(mod) {
-    coefs <- coef(mod)
-    if ("vol_5yr_std_wide" %in% names(coefs)) {
-      coefs["vol_5yr_std_wide"]
-    } else {
-      0
-    }
-  }),
-  se_vol_5yr_wide = map_dbl(models_vol_5yr, function(mod) {
-    V <- try(vcov(mod), silent = TRUE)
-    if (!inherits(V, "try-error") &&
-        "vol_5yr_std_wide" %in% rownames(V) &&
-        "vol_5yr_std_wide" %in% colnames(V)) {
-      sqrt(V["vol_5yr_std_wide", "vol_5yr_std_wide"])
-    } else {
-      0
-    }
-  })
-)
-
-cat("\nFigura 21(a): Dinámica – Volatilidad 5-Year × Shock (mpso)\n")
-print(coefs_vol_5yr)
-
-# --------------------------------------------------------------------------------
-# 9) Graficar coeficientes “vol_5yr_std_wide” con bandas ±1.96 × SE
-# --------------------------------------------------------------------------------
-p_vol_5yr <- ggplot(coefs_vol_5yr, aes(x = horizon, y = beta_vol_5yr_wide)) +
-  geom_line(size = 1, color = "purple") +
-  geom_point(size = 2, color = "purple") +
-  geom_ribbon(aes(ymin = beta_vol_5yr_wide - 1.96 * se_vol_5yr_wide,
-                  ymax = beta_vol_5yr_wide + 1.96 * se_vol_5yr_wide),
-              fill = "purple", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title    = "Figura 21(a): Dinámica – Volatilidad 5-Year × Shock (mpso)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x        = "Horizonte (trimestres)",
-    y        = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-print(p_vol_5yr)
-
-# --------------------------------------------------------------------------------
-# 10) Fin del script para Figura 21 (solo Volatilidad 5‐Year)
-# --------------------------------------------------------------------------------
-
-
-
-
-
-
-
-# *******************************************************************************
-# Figura 22: Dinámica Conjunta de Posición Financiera (DD / Leverage) y Volatilidad 5‐Year
-# (Usando TODO el panel sin recortes de periodos antiguos; horizonte h = 0…12)
-#*******************************************************************************
-
-# 0) Cargar librerías necesarias
-library(haven)     # read_dta()
-library(zoo)       # as.yearqtr(), rollapply()
-library(dplyr)     # Manipulación de datos
-library(tidyr)     # replace_na()
-library(purrr)     # map(), map_dfc()
-library(fixest)    # feols()
-library(ggplot2)   # Graficar (si se quisiera)
-
-# --------------------------------------------------------------------------------
-# 1) Leer el panel “Data_Base_final.dta” y ordenar por firma + fecha
-# --------------------------------------------------------------------------------
-base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
-df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
-  mutate(dateq = as.yearqtr(dateq)) %>%
-  arrange(name, dateq)
-
-# --------------------------------------------------------------------------------
-# 2) Preprocesar variables firm‐level (idéntico a Figura 21):
-#    - dlog_capital, Ldl_capital
-#    - rsales_g_std  (crecimiento de ventas estandarizado)
-#    - lev_std, dd_std  (apalancamiento y DD estandarizados)
-#    - liq_std  (liquidez estandarizada a partir de current_ratio)
-#    - “yoy_sales” = Δ log(saleq) año‐año
-#    - vol_5yr = sd de yoy_sales en ventana móvil de 20 trimestres (5 años), estandarizada dentro de cada firma
-#    - Interacciones:
-#        • vol_5yr_std_gdp   = vol_5yr_std × dlog_gdp
-#        • vol_5yr_std_wide  = vol_5yr_std × mpso
-#        • vol_5yr_std_mps   = vol_5yr_std × mps
-#        • d2d_wins_dem_std_gdp  = dd_std × dlog_gdp
-#        • d2d_wins_dem_std_wide = dd_std × mpso
-#        • d2d_wins_dem_std      = dd_std × mps
-#        • lev_wins_dem_std_gdp   = lev_std × dlog_gdp
-#        • lev_wins_dem_std_wide  = lev_std × mpso
-#        • lev_wins_dem_std       = lev_std × mps
-# --------------------------------------------------------------------------------
-df <- df %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.1) dlog_capital y su rezago
-    capital2     = if_else(!is.na(capital) & capital > 0, capital, NA_real_),
-    log_capital  = log(capital2),
-    lag_log_cap  = lag(log_capital),
-    dlog_capital = log_capital - lag_log_cap,
-    Ldl_capital  = lag(dlog_capital, 1),
-    
-    # 2.2) Crecimiento de ventas para rsales_g_std
-    saleq2       = if_else(!is.na(saleq) & saleq > 0, saleq, NA_real_),
-    log_sales    = log(saleq2),
-    rsales_g     = log_sales - lag(log_sales),
-    rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE),
-    
-    # 2.3) Estandarizar apalancamiento y DD
-    lev_std = if_else(
-      !is.na(leverage),
-      (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-      NA_real_
-    ),
-    dd_std  = if_else(
-      !is.na(dd),
-      (dd - mean(dd, na.rm = TRUE)) / sd(dd, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.4) Estandarizar liquidez a partir de current_ratio
-    liq_std = if_else(
-      !is.na(current_ratio),
-      (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE),
-      NA_real_
-    ),
-    
-    # 2.5) Preparar “yoy_sales” = Δ log(saleq) año‐año
-    yoy_sales = if_else(
-      !is.na(log_sales) & !is.na(lag(log_sales, 4)),
-      log_sales - lag(log_sales, 4),
-      NA_real_
-    )
-  ) %>%
-  ungroup() %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
-    # 2.6) Volatilidad 5‐Year: sd de yoy_sales en ventana móvil de 20 trimestres
-    vol_5yr = zoo::rollapply(
-      data  = yoy_sales,
-      width = 20,
-      FUN   = function(x) sd(x, na.rm = TRUE),
-      align = "right",
-      fill  = NA
-    ),
-    
-    # 2.7) Estandarizar vol_5yr dentro de cada firma
-    vol_5yr_std = (vol_5yr - mean(vol_5yr, na.rm = TRUE)) / sd(vol_5yr, na.rm = TRUE),
-    
-    # 2.8) Interacciones para volatilidad 5‐Year con choques monetarios
-    vol_5yr_std_gdp  = vol_5yr_std * dlog_gdp,
-    vol_5yr_std_wide = vol_5yr_std * mpso,
-    vol_5yr_std_mps  = vol_5yr_std * mps,
-    
-    # 2.9) Interacciones para DD con choques monetarios
-    d2d_wins_dem_std_gdp  = dd_std * dlog_gdp,
-    d2d_wins_dem_std_wide = dd_std * mpso,
-    d2d_wins_dem_std      = dd_std * mps,
-    
-    # 2.10) Interacciones para Leverage con choques monetarios
-    lev_wins_dem_std_gdp  = lev_std * dlog_gdp,
-    lev_wins_dem_std_wide = lev_std * mpso,
-    lev_wins_dem_std      = lev_std * mps
-  ) %>%
-  ungroup() %>%
-  # 2.11) Eliminar variables intermedias ya no necesarias
-  select(-capital2, -lag_log_cap, -saleq2, -log_sales, -rsales_g, -yoy_sales)
-
-# --------------------------------------------------------------------------------
-# 3) Generar variables dinámicas acumuladas cumF0…cumF12 de dlog_capital
-#    (local projections dentro de cada firma)
-# --------------------------------------------------------------------------------
-df_dyn <- df %>% arrange(name, dateq)
-for (h in 0:12) {
-  new_col <- paste0("cumF", h, "_dlog_capital")
-  df_dyn <- df_dyn %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      !!new_col := rowSums(
-        map_dfc(0:h, ~ lead(dlog_capital, .x)),
-        na.rm = TRUE
-      )
-    ) %>%
-    ungroup()
-}
-
-# --------------------------------------------------------------------------------
-# 4) Reemplazar NA en regresores de RHS por 0
-#    (para conservar filas salvo que falte cumFh_dlog_capital)
-# --------------------------------------------------------------------------------
-df_dyn <- df_dyn %>%
-  mutate(
-    across(
-      c(
-        "rsales_g_std", "liq_std", "Ldl_capital",
-        # Interacciones volatilidad 5‐Year
-        "vol_5yr_std_gdp", "vol_5yr_std_wide", "vol_5yr_std_mps",
-        # Interacciones DD
-        "d2d_wins_dem_std_gdp", "d2d_wins_dem_std_wide", "d2d_wins_dem_std",
-        # Interacciones Leverage
-        "lev_wins_dem_std_gdp", "lev_wins_dem_std_wide", "lev_wins_dem_std"
-      ),
-      ~ replace_na(.x, 0)
-    )
-  )
-
-# --------------------------------------------------------------------------------
-# 5) Definir controles firma‐level:
-#      – “rsales_g_std” y “liq_std”
-#    Efectos fijos: name + Country_x
-# --------------------------------------------------------------------------------
-controls_firm <- c("rsales_g_std", "liq_std")
-
-# --------------------------------------------------------------------------------
-# 6) (a) Dinámica conjunta: Distance‐to‐Default y Volatilidad 5‐Year
-#      Bucle h = 0…12:
-#        cumFh_dlog_capital ~
-#          vol_5yr_std_gdp + vol_5yr_std_wide + vol_5yr_std_mps +
-#          d2d_wins_dem_std_gdp + d2d_wins_dem_std_wide + d2d_wins_dem_std +
-#          rsales_g_std + liq_std
-#        | name + Country_x, cluster(~dateq + name)
-# --------------------------------------------------------------------------------
-models_dd_volatility <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "vol_5yr_std_gdp + vol_5yr_std_wide + vol_5yr_std_mps + ",
-    "d2d_wins_dem_std_gdp + d2d_wins_dem_std_wide + d2d_wins_dem_std + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_dd_volatility) <- paste0("m", 0:12)
-
-# --------------------------------------------------------------------------------
-# 7) Extraer coeficientes y errores de “vol_5yr_std_wide” y “d2d_wins_dem_std_wide”
-# --------------------------------------------------------------------------------
-coefs_dd_volatility <- tibble(
-  horizon                  = 0:12,
-  beta_vol_5yr_wide_dd     = map_dbl(models_dd_volatility, function(mod) {
-    cfs <- coef(mod)
-    if ("vol_5yr_std_wide" %in% names(cfs)) cfs["vol_5yr_std_wide"] else NA_real_
-  }),
-  se_vol_5yr_wide_dd       = map_dbl(models_dd_volatility, function(mod) {
-    V <- try(vcov(mod), silent = TRUE)
-    if (!inherits(V, "try-error") &&
-        "vol_5yr_std_wide" %in% rownames(V) &&
-        "vol_5yr_std_wide" %in% colnames(V)) {
-      sqrt(V["vol_5yr_std_wide", "vol_5yr_std_wide"])
-    } else {
-      NA_real_
-    }
-  }),
-  beta_d2d_wide            = map_dbl(models_dd_volatility, function(mod) {
-    cfs <- coef(mod)
-    if ("d2d_wins_dem_std_wide" %in% names(cfs)) cfs["d2d_wins_dem_std_wide"] else NA_real_
-  }),
-  se_d2d_wide              = map_dbl(models_dd_volatility, function(mod) {
-    V <- try(vcov(mod), silent = TRUE)
-    if (!inherits(V, "try-error") &&
-        "d2d_wins_dem_std_wide" %in% rownames(V) &&
-        "d2d_wins_dem_std_wide" %in% colnames(V)) {
-      sqrt(V["d2d_wins_dem_std_wide", "d2d_wins_dem_std_wide"])
-    } else {
-      NA_real_
-    }
-  })
-)
-
-cat("\nFigura 22(a): Dinámica conjunta – DD × Volatilidad 5-Year\n")
-print(coefs_dd_volatility)
-
-#---------------------------------------------------------------------------------
-# 8) (b) Dinámica conjunta: Leverage y Volatilidad 5‐Year
-#      Bucle h = 0…12:
-#        cumFh_dlog_capital ~
-#          vol_5yr_std_gdp + vol_5yr_std_wide + vol_5yr_std_mps +
-#          lev_wins_dem_std_gdp + lev_wins_dem_std_wide + lev_wins_dem_std +
-#          rsales_g_std + liq_std
-#        | name + Country_x, cluster(~dateq + name)
-# --------------------------------------------------------------------------------
-models_lev_volatility <- map(0:12, function(h) {
-  dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(
-    dep_var, " ~ ",
-    "vol_5yr_std_gdp + vol_5yr_std_wide + vol_5yr_std_mps + ",
-    "lev_wins_dem_std_gdp + lev_wins_dem_std_wide + lev_wins_dem_std + ",
-    paste(controls_firm, collapse = " + "),
-    " | name + Country_x"
-  ))
-  feols(fml, data = df_dyn, cluster = ~dateq + name)
-})
-names(models_lev_volatility) <- paste0("m", 0:12)
-
-# --------------------------------------------------------------------------------
-# 9) Extraer coeficientes y errores de “vol_5yr_std_wide” y “lev_wins_dem_std_wide”
-# --------------------------------------------------------------------------------
-coefs_lev_volatility <- tibble(
-  horizon                  = 0:12,
-  beta_vol_5yr_wide_lev    = map_dbl(models_lev_volatility, function(mod) {
-    cfs <- coef(mod)
-    if ("vol_5yr_std_wide" %in% names(cfs)) cfs["vol_5yr_std_wide"] else NA_real_
-  }),
-  se_vol_5yr_wide_lev      = map_dbl(models_lev_volatility, function(mod) {
-    V <- try(vcov(mod), silent = TRUE)
-    if (!inherits(V, "try-error") &&
-        "vol_5yr_std_wide" %in% rownames(V) &&
-        "vol_5yr_std_wide" %in% colnames(V)) {
-      sqrt(V["vol_5yr_std_wide", "vol_5yr_std_wide"])
-    } else {
-      NA_real_
-    }
-  }),
-  beta_lev_wide            = map_dbl(models_lev_volatility, function(mod) {
-    cfs <- coef(mod)
-    if ("lev_wins_dem_std_wide" %in% names(cfs)) cfs["lev_wins_dem_std_wide"] else NA_real_
-  }),
-  se_lev_wide              = map_dbl(models_lev_volatility, function(mod) {
-    V <- try(vcov(mod), silent = TRUE)
-    if (!inherits(V, "try-error") &&
-        "lev_wins_dem_std_wide" %in% rownames(V) &&
-        "lev_wins_dem_std_wide" %in% colnames(V)) {
-      sqrt(V["lev_wins_dem_std_wide", "lev_wins_dem_std_wide"])
-    } else {
-      NA_real_
-    }
-  })
-)
-
-cat("\nFigura 22(b): Dinámica conjunta – Leverage × Volatilidad 5-Year\n")
-print(coefs_lev_volatility)
-
-# --------------------------------------------------------------------------------
-# 10) (Opcional) Graficar cada serie con bandas ±1.96 × SE
-#     Ejemplo para Figura 22(a):
-# --------------------------------------------------------------------------------
-p_dd_vol <- ggplot(coefs_dd_volatility, aes(x = horizon)) +
-  geom_line(aes(y = beta_vol_5yr_wide_dd), color = "blue", size = 1) +
-  geom_ribbon(aes(ymin = beta_vol_5yr_wide_dd - 1.96 * se_vol_5yr_wide_dd,
-                  ymax = beta_vol_5yr_wide_dd + 1.96 * se_vol_5yr_wide_dd),
-              fill = "blue", alpha = 0.2) +
-  geom_line(aes(y = beta_d2d_wide), color = "red", size = 1) +
-  geom_ribbon(aes(ymin = beta_d2d_wide - 1.96 * se_d2d_wide,
-                  ymax = beta_d2d_wide + 1.96 * se_d2d_wide),
-              fill = "red", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Figura 22(a): Dinámica conjunta – DD (rojo) vs Volatilidad 5-Year (azul)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x = "Horizonte (trimestres)",
-    y = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-p_dd_vol  # Mostrar gráfico para 22(a)
-
-# Ejemplo para Figura 22(b):
-p_lev_vol <- ggplot(coefs_lev_volatility, aes(x = horizon)) +
-  geom_line(aes(y = beta_vol_5yr_wide_lev), color = "purple", size = 1) +
-  geom_ribbon(aes(ymin = beta_vol_5yr_wide_lev - 1.96 * se_vol_5yr_wide_lev,
-                  ymax = beta_vol_5yr_wide_lev + 1.96 * se_vol_5yr_wide_lev),
-              fill = "purple", alpha = 0.2) +
-  geom_line(aes(y = beta_lev_wide), color = "darkgreen", size = 1) +
-  geom_ribbon(aes(ymin = beta_lev_wide - 1.96 * se_lev_wide,
-                  ymax = beta_lev_wide + 1.96 * se_lev_wide),
-              fill = "darkgreen", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Figura 22(b): Dinámica conjunta – Leverage (verde) vs Volatilidad 5-Year (púrpura)",
-    subtitle = "Horizonte 0–12 trimestres",
-    x = "Horizonte (trimestres)",
-    y = "Coeficiente acumulado"
-  ) +
-  theme_minimal()
-p_lev_vol  # Mostrar gráfico para 22(b)
-
-# --------------------------------------------------------------------------------
-# 11) Fin del script para Figura 22
-# --------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
+  
