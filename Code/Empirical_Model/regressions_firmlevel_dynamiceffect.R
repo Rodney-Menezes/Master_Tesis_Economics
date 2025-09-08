@@ -32,6 +32,27 @@ winsorize <- function(x, p = 0.005) {
   pmin(pmax(x, lo), hi)
 }
 
+# helper: winsorize, de-mean, and standardize leverage and dd
+prep_fin_vars <- function(df) {
+  df %>%
+    mutate(
+      leverage_win = winsorize(leverage),
+      dd_win       = winsorize(dd)
+    ) %>%
+    group_by(name) %>%
+    mutate(
+      lev_dev = leverage_win - mean(leverage_win, na.rm = TRUE),
+      dd_dev  = dd_win       - mean(dd_win,       na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    mutate(
+      lev_std = (leverage_win - mean(leverage_win, na.rm = TRUE)) /
+        sd(leverage_win, na.rm = TRUE),
+      dd_std  = (dd_win       - mean(dd_win,       na.rm = TRUE)) /
+        sd(dd_win,       na.rm = TRUE)
+    )
+}
+
 # 1) Leer base de datos y convertir fecha a trimestral
 # --------------------------------------------------------
 ruta_dta <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final/Data_Base_final.dta"
@@ -53,10 +74,7 @@ df <- df %>%
   select(-ratio_cap) %>%
   ungroup() %>%
   filter(!is.na(dlog_capital)) %>%
-  mutate(
-    leverage_win = winsorize(leverage),
-    dd_win       = winsorize(dd)
-  )
+  prep_fin_vars()
 
 # 3) Calcular dlog_gdp a nivel país y unirlo
 # --------------------------------------------------------
@@ -120,10 +138,10 @@ if (!"sh_current_a_std" %in% names(df)) {
 
 # 2) Crear interacciones “raw” (winsorizadas) con el shock
 df <- df %>%
-  mutate(
-    lev_shock = leverage_win * shock,
-    d2d_shock = dd_win       * shock
-  )
+mutate(
+       lev_shock = lev_std * shock,
+       d2d_shock = dd_std  * shock
+)
 
 # 3) Construir cumFh_dlog_capital para h = 0…12
 # --------------------------------------------------------
@@ -402,28 +420,24 @@ if (!"Ldl_capital" %in% names(df)) {
     ungroup()
 }
 
-# 2) Winsorización raw de leverage y dd, y creación de interacciones
-# --------------------------------------
-df <- df %>%
-  mutate(
-    leverage_win = winsorize(leverage),
-    dd_win       = winsorize(dd)
-  )
+# 2) Winsorizar, de-mediana y estandarizar leverage y dd
+# ------------------------------------------------------
+df <- prep_fin_vars(df)
 
-# 3) Interacciones raw con shock y con dlog_gdp (si existe)
-# --------------------------------------
+# 3) Interacciones con shock y con dlog_gdp (si existe)
+# ------------------------------------------------------
 if ("dlog_gdp" %in% names(df)) {
   df <- df %>%
     mutate(
-      lev_shock_gdp = leverage_win * dlog_gdp,
-      d2d_shock_gdp = dd_win       * dlog_gdp
+      lev_shock_gdp = lev_std * dlog_gdp,
+      d2d_shock_gdp = dd_std * dlog_gdp
     )
 }
 
 df <- df %>%
   mutate(
-    lev_shock = leverage_win * shock,
-    d2d_shock = dd_win       * shock
+    lev_shock = lev_std * shock,
+    d2d_shock = dd_std  * shock
   )
 
 # 4) Construir cumFh_dlog_capital para h = 0…12
@@ -661,14 +675,12 @@ if (!"sh_current_a_std" %in% names(df)) {
     }) %>% ungroup()
 }
 
-# 3) Winsorizar leverage y dd y crear interacciones “raw” con el shock
+# 3) Winsorizar, de-mediana y estandarizar leverage y dd; crear interacciones con el shock
 # ---------------------------------------------------------------------
-df <- df %>%
+df <- prep_fin_vars(df) %>%
   mutate(
-    leverage_win = winsorize(leverage),
-    dd_win       = winsorize(dd),
-    lev_shock    = leverage_win * shock,
-    d2d_shock    = dd_win       * shock
+    lev_shock = lev_std * shock,
+    d2d_shock = dd_std  * shock
   )
 
 # 4) Construir variables dinámicas cumFh_int_exp para h = 0…12
@@ -795,9 +807,9 @@ df_cntl <- df
 # ------------------------------------------------------------------------
 
 df_cntl <- df_cntl %>%
-  group_by(name) %>%
-  arrange(dateq, .by_group = TRUE) %>%
-  mutate(
+group_by(name) %>%
+arrange(dateq, .by_group = TRUE) %>%
+mutate(
     #  crecimiento de ventas
     rsales_g = if (!"rsales_g" %in% names(.)) log(saleq) - log(lag(saleq)) else rsales_g,
     rsales_g_std = if (!"rsales_g_std" %in% names(.))
@@ -811,14 +823,11 @@ df_cntl <- df_cntl %>%
     # liquidez corriente estandarizada
     sh_current_a_std = if (!"sh_current_a_std" %in% names(.))
       (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE)
-    else sh_current_a_std,
-    
-    # winsorización de apalancamiento y distancia al default
-    leverage_win = if (!"leverage_win" %in% names(.)) winsorize(leverage) else leverage_win,
-    dd_win        = if (!"dd_win"        %in% names(.)) winsorize(dd)        else dd_win
-  ) %>%
+    else sh_current_a_std
+) %>%
   ungroup() %>%
-  select(-size_raw)
+  select(-size_raw) %>%
+  prep_fin_vars()
 
 # 2) Crear interacciones size × GDP y size × shock
 # --------------------------------------------------------
@@ -929,25 +938,24 @@ df_cntl13 <- df_cntl13 %>%
   arrange(dateq) %>%
   mutate(
     # tamaño proxy bruto sin estandarizar
-    size_raw   = (log(atq) + saleq) / 2,
-    size_win   = winsorize(size_raw),
-    # winsorización de condiciones financieras
-    leverage_win = winsorize(leverage),
-    dd_win       = winsorize(dd)
+    size_raw = (log(atq) + saleq) / 2,
+    size_win = winsorize(size_raw)
   ) %>%
-  ungroup()
+  ungroup() %>%
+  select(-size_raw) %>%
+  prep_fin_vars()
 
 # 2) rear interacciones con shock y dlog_gdp
 # -------------------------------------------
 df_cntl13 <- df_cntl13 %>%
-  mutate(
-    size_shock    = size_win       * shock,
-    size_gdp      = size_win       * dlog_gdp,
-    lev_shock     = leverage_win   * shock,
-    lev_shock_gdp = leverage_win   * dlog_gdp,
-    d2d_shock     = dd_win         * shock,
-    d2d_shock_gdp = dd_win         * dlog_gdp
-  )
+mutate(
+       size_shock    = size_win * shock,
+       size_gdp      = size_win * dlog_gdp,
+       lev_shock     = lev_std * shock,
+       lev_shock_gdp = lev_std * dlog_gdp,
+       d2d_shock     = dd_std  * shock,
+       d2d_shock_gdp = dd_std  * dlog_gdp
+)
 
 # 3) Construir dlog_capital y dinámicas cumFh_dlog_capital
 # ---------------------------------------------------------
