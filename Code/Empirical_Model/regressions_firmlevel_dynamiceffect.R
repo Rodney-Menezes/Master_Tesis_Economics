@@ -90,12 +90,38 @@ if (!"sh_current_a_std" %in% names(df)) {
   message("Variable 'sh_current_a_std' ya existe; omitiendo.")
 }
 
+# Estandarizar controles macro
+macro_vars <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+existing_macro <- intersect(macro_vars, names(df))
+missing_std <- setdiff(paste0(existing_macro, "_std"), names(df))
+if (length(existing_macro) > 0 && length(missing_std) > 0) {
+  df <- df %>% mutate(
+    across(all_of(existing_macro),
+           ~ (.-mean(., na.rm=TRUE)) / sd(., na.rm=TRUE),
+           .names = "{.col}_std")
+  )
+} else {
+  message("Variables macro estandarizadas ya existen o no hay macros disponibles; omitiendo.")
+}
+
 if (!all(c("lev_std","dd_std") %in% names(df))) {
   df <- df %>%
     group_by(name) %>% arrange(dateq) %>%
     mutate(
-      lev_std = { x <- leverage; (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) },
-      dd_std  = { x <- dd;       (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE) }
+      lev_std = {
+        x <- leverage
+        qs <- quantile(x, c(0.01, 0.99), na.rm=TRUE)
+        x_w <- pmin(pmax(x, qs[1]), qs[2])
+        x_dm <- x_w - mean(x_w, na.rm=TRUE)
+        x_dm / sd(x_dm, na.rm=TRUE)
+      },
+      dd_std = {
+        x <- dd
+        qs <- quantile(x, c(0.01, 0.99), na.rm=TRUE)
+        x_w <- pmin(pmax(x, qs[1]), qs[2])
+        x_dm <- x_w - mean(x_w, na.rm=TRUE)
+        x_dm / sd(x_dm, na.rm=TRUE)
+      }
     ) %>% ungroup()
 } else {
   message("Variables 'lev_std' y 'dd_std' ya existen; omitiendo.")
@@ -134,7 +160,7 @@ if (!all(dyn_vars %in% names(df))) {
 # 5) Definir controles firm-level y macro (con detección de faltantes)
 # --------------------------------------------------------
 controls_firm  <- c("rsales_g_std", "size_index", "sh_current_a_std")
-controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+controls_macro <- paste0(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), "_std")
 
 # Detectar los controles macro efectivamente presentes en df_dyn
 present_macro <- intersect(controls_macro, names(df_dyn))
