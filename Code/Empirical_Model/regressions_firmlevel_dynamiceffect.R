@@ -38,13 +38,25 @@ df <- df %>%
   ) %>%
   ungroup()
 
-# 3) Generar interacciones leverage×shock y dd×shock (usando mps)
+# 3) Winsorizar, de-medial y estandarizar leverage y dd, luego crear interacciones con mps
+winsorize <- function(x, p = 0.005) {
+  lo <- quantile(x, p, na.rm = TRUE)
+  hi <- quantile(x, 1 - p, na.rm = TRUE)
+  pmin(pmax(x, lo), hi)
+}
+
 df <- df %>%
+  mutate(
+    leverage_win = winsorize(leverage),
+    dd_win       = winsorize(dd)
+  ) %>%
   group_by(name) %>%
   arrange(dateq) %>%
   mutate(
-    lev_std = (leverage - mean(leverage, na.rm = TRUE)) / sd(leverage, na.rm = TRUE),
-    dd_std  = (dd       - mean(dd,        na.rm = TRUE)) / sd(dd,        na.rm = TRUE),
+    lev_dev = leverage_win - mean(leverage_win, na.rm = TRUE),
+    dd_dev  = dd_win       - mean(dd_win,       na.rm = TRUE),
+    lev_std = lev_dev / sd(lev_dev, na.rm = TRUE),
+    dd_std  = dd_dev  / sd(dd_dev,  na.rm = TRUE),
     # Interacciones con mps (raw shock)
     lev_wins_dem_std = lev_std * mps,
     d2d_wins_dem_std = dd_std  * mps
