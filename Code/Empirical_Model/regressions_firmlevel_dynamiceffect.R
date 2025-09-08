@@ -173,20 +173,20 @@ res_lev_nocy <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls_nocy,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 res_dd_nocy <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls_nocy,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 
@@ -211,7 +211,7 @@ p1 <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
               fill = "firebrick", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (a): Heterogeneidad por apalancamiento",
+     title    = "Panel (a): Heterogeneidad por apalancamiento (FE: Country+dateq)",
     subtitle = "Sin control cíclico",
     x        = "Trimestres",
     y        = "Efecto acumulado de inversión neta"
@@ -226,7 +226,7 @@ p2 <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
               fill = "steelblue", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (b): Heterogeneidad por distancia al default",
+    title    = "Panel (b): Heterogeneidad por distancia al default (FE: Country+dateq)",
     subtitle = "Sin control cíclico",
     x        = "Trimestres",
     y        = "Efecto acumulado de inversión neta"
@@ -261,20 +261,20 @@ res_lev_cyc <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls_cyc,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn_cyc,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 res_dd_cyc <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls_cyc,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn_cyc,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 
@@ -299,7 +299,7 @@ p3 <- ggplot(dyn_lev_cyc, aes(x = horizon, y = beta)) +
               fill = "firebrick", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (c): Heterogeneidad por apalancamiento",
+    title    = "Panel (c): Heterogeneidad por apalancamiento (FE: Country+dateq)",
     subtitle = "Con control cíclico",
     x        = "Trimestres",
     y        = "Efecto acumulado de inversión neta"
@@ -314,7 +314,7 @@ p4 <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
               fill = "steelblue", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (d): Heterogeneidad por distancia al default",
+    title    = "Panel (d): Heterogeneidad por distancia al default (FE: Country+dateq)",
     subtitle = "Con control cíclico",
     x        = "Trimestres",
     y        = "Efecto acumulado de inversión neta"
@@ -324,7 +324,7 @@ p4 <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
 # 7) Montaje final en 2×2
 figure1 <- (p1 | p2) / (p3 | p4) +
   plot_annotation(
-    title = "Figura 1: Heterogeneidad financiera en la dinámica de la inversión neta ante un shock monetario expansivo"
+    title = "Figura 1: Heterogeneidad financiera en la dinámica de la inversión neta ante un shock monetario expansivo (FE: Country+dateq)"
   )
 
 print(figure1)
@@ -369,9 +369,9 @@ res_avg <- map(0:12, function(h) {
   fml <- as.formula(paste0(
     dep_var,
     " ~ shock + lev_shock + d2d_shock + ", all_controls,
-    " | name + Country"
+    " | Country + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ name + Country)
+  feols(fml, data = df_dyn, cluster = ~ Country + dateq)
 })
 
 # 6) Extraer coeficientes y errores estándar para 'shock'
@@ -393,7 +393,7 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   ), alpha = 0.2, fill = "darkgreen") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 3: Respuesta Dinámica de la Inversión Neta ante un Shock Monetario",
+    title = "Figura 3: Respuesta Dinámica de la Inversión Neta ante un Shock Monetario (FE: Country+dateq)",
     x     = "Trimestres",
     y     = "Efecto acumulado de inversión neta"
   ) +
@@ -479,8 +479,8 @@ res_lev_lag <- map(0:12, function(h) {
     "Ldl_capital",
     base_controls
   )
-  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + Country")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ name + Country)
+  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| Country + dateq")
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq)
 })
 
 res_dd_lag <- map(0:12, function(h) {
@@ -491,8 +491,8 @@ res_dd_lag <- map(0:12, function(h) {
     "Ldl_capital",
     base_controls
   )
-  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + Country")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ name + Country)
+  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| Country + dateq")
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq)
 })
 
 # 7) Extraer coeficientes y errores para plot
@@ -519,7 +519,7 @@ p11a <- ggplot(coef_lev_lag, aes(x = horizon, y = beta_shock)) +
               fill = "firebrick", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Panel (a): Heterogeneidad por apalancamiento",
+    title = "Panel (a): Heterogeneidad por apalancamiento (FE: Country+dateq)",
     x     = "Trimestres",
     y     = "Efecto acumulado de la inversion neta residual"
   ) +
@@ -533,7 +533,7 @@ p11b <- ggplot(coef_dd_lag, aes(x = horizon, y = beta_shock)) +
               fill = "steelblue", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Panel (b): Heterogeneidad por distancia al default",
+    title = "Panel (b): Heterogeneidad por distancia al default (FE: Country+dateq)",
     x     = "Trimestres",
     y     = "Efecto acumulado de la inversion neta residual"
   ) +
@@ -543,7 +543,7 @@ p11b <- ggplot(coef_dd_lag, aes(x = horizon, y = beta_shock)) +
 # --------------------------------------
 (p11a / p11b) +
   plot_annotation(
-    title = "Figura 5: Heterogeneidad financiera en la dinámica de la inversión neta residual ante un shock monetario expansivo"
+    title = "Figura 5: Heterogeneidad financiera en la dinámica de la inversión neta residual ante un shock monetario expansivo (FE: Country+dateq)"
   )
 
 
@@ -596,9 +596,9 @@ res_avg <- map(0:12, function(h) {
   fml <- as.formula(paste0(
     dep_var,
     " ~ shock + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
-    " | name + Country"
+    " | Country + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~name + Country)
+  feols(fml, data = df_dyn, cluster = ~ Country + dateq)
 })
 
 # 7) Extraer coeficientes y errores estándar para 'shock'
@@ -620,7 +620,7 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   ), alpha = 0.2, fill = "purple") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 7: Respuesta Dinámica de la Inversión Neta residual ante un Shock Monetario",
+    title = "Figura 7: Respuesta Dinámica de la Inversión Neta residual ante un Shock Monetario (FE: Country+dateq)",
     x     = "Trimestres",
     y     = "Efecto acumulado de inversión neta residual"
   ) +
@@ -721,20 +721,20 @@ res_IR_lev <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       dyn_vars[h+1], " ~ lev_shock + ", all_controls,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 res_IR_dd <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       dyn_vars[h+1], " ~ d2d_shock + ", all_controls,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 
@@ -775,7 +775,7 @@ p_lev <- ggplot(IR_lev, aes(x = horizon, y = beta_lev)) +
                   ymax = beta_lev + 1.96*se_lev),
               alpha = 0.2, fill = "firebrick") +
   scale_x_continuous(breaks = 0:12) +
-  labs(title = "Heterogeneidad por apalancamiento", x = "Trimestres",
+  labs(title = "Heterogeneidad por apalancamiento (FE: Country+dateq)", x = "Trimestres",
        y = "Δ pagos de interés acumulados") +
   theme_minimal()
 
@@ -786,12 +786,12 @@ p_dd <- ggplot(IR_dd, aes(x = horizon, y = beta_dd)) +
                   ymax = beta_dd + 1.96*se_dd),
               alpha = 0.2, fill = "steelblue") +
   scale_x_continuous(breaks = 0:12) +
-  labs(title = "Heterogeneidad por distancia al default", x = "Trimestres",
+  labs(title = "Heterogeneidad por distancia al default (FE: Country+dateq)", x = "Trimestres",
        y = "Δ pagos de interés acumulados") +
   theme_minimal()
 
 (p_lev / p_dd) +
-  plot_annotation(title = "Figure 18: Heterogeneidad financiera en la dinámica de pagos de interés")
+  plot_annotation(title = "Figure 18: Heterogeneidad financiera en la dinámica de pagos de interés (FE: Country+dateq)")
 
 
 
@@ -889,10 +889,10 @@ res_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars_cum[h+1], " ~ size_shock + ", all_controls,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn12,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 
@@ -915,7 +915,7 @@ ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
   ), alpha = 0.2, fill = "orange") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 10: Heterogeneidad de la inversion por tamaño de empresa",
+    title = "Figura 10: Heterogeneidad de la inversion por tamaño de empresa (FE: Country+dateq)",
     x     = "Trimestres",
     y     = "Efecto acumulado de inversión neta"
   ) +
@@ -989,10 +989,10 @@ res_lev_size <- map(0:12, function(h) {
     as.formula(paste0(
       vars13[h+1],
       " ~ size_shock + lev_shock + lev_shock_gdp + ", all_controls13,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 
@@ -1002,10 +1002,10 @@ res_dd_size <- map(0:12, function(h) {
     as.formula(paste0(
       vars13[h+1],
       " ~ size_shock + d2d_shock + d2d_shock_gdp + ", all_controls13,
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 
@@ -1033,7 +1033,7 @@ p13a <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_size)) +
   geom_ribbon(aes(ymin = beta_size - 1.96 * se_size,
                   ymax = beta_size + 1.96 * se_size),
               fill = "darkgreen", alpha = 0.2) +
-  labs(title = "Panel (a): Heterogeneidad por tamaño", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
+    labs(title = "Panel (a): Heterogeneidad por tamaño (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
   theme_minimal()
 
 # 5b) Gráfico Leverage × Shock
@@ -1042,7 +1042,7 @@ p13b <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_lev)) +
   geom_ribbon(aes(ymin = beta_lev - 1.96 * se_lev,
                   ymax = beta_lev + 1.96 * se_lev),
               fill = "firebrick", alpha = 0.2) +
-  labs(title = "Panel (b): Heterogeneidad por apalancamiento", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
+    labs(title = "Panel (b): Heterogeneidad por apalancamiento (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
   theme_minimal()
 
 # 5c) Gráfico DD × Shock
@@ -1051,14 +1051,14 @@ p13c <- ggplot(dd_size_coefs, aes(x = horizon, y = beta_dd)) +
   geom_ribbon(aes(ymin = beta_dd - 1.96 * se_dd,
                   ymax = beta_dd + 1.96 * se_dd),
               fill = "steelblue", alpha = 0.2) +
-  labs(title = "Panel (c): Heterogeneidad por distancia al default", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
+    labs(title = "Panel (c): Heterogeneidad por distancia al default (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
   theme_minimal()
 
 # 6) Montaje final 3×1
 # ----------------------
 (p13a / p13b / p13c) +
   plot_annotation(
-    title = "Figura 13: Heterogeneidad conjunta de la posición Financiera y tamaño en la dinamica de la inversion neta"
+    title = "Figura 13: Heterogeneidad conjunta de la posición Financiera y tamaño en la dinamica de la inversion neta (FE: Country+dateq)"
   )
 
 
@@ -1175,10 +1175,10 @@ res21 <- map(0:12, function(h) {
     as.formula(paste0(
       vars21[h+1], " ~ ",
       paste(rhs, collapse = " + "),
-      " | name + Country"
+      " | Country + dateq"
     )),
     data    = df_dyn21,
-    cluster = ~ name + Country
+    cluster = ~ Country + dateq
   )
 })
 
@@ -1199,7 +1199,7 @@ ggplot(tbl21, aes(x = horizon, y = beta_vol_shock)) +
               alpha = 0.2, fill = "purple") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 21: Heterogeneidad por volatilidad de los ultimos 5 años de la inversion neta",
+    title = "Figura 21: Heterogeneidad por volatilidad de los ultimos 5 años de la inversion neta (FE: Country+dateq)",
     x     = "Horizonte (trimestres)",
     y     = "Efecto acumulado de inversión"
   ) +
