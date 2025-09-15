@@ -32,50 +32,39 @@ winsorize <- function(x, p = 0.005) {
   pmin(pmax(x, lo), hi)
 }
 
-# helper: winsorize, de-mean, and standardize leverage and dd
-prep_fin_vars <- function(df) {
+# helper: winsorize and de-mean leverage and dd within firm
+prep_fin_vars <- function(df, p = 0.005) {
   df %>%
-    mutate(
-      leverage_win = winsorize(leverage),
-      dd_win       = winsorize(dd)
-    ) %>%
     group_by(name) %>%
     mutate(
-      lev_dev = leverage_win - mean(leverage_win, na.rm = TRUE),
-      dd_dev  = dd_win       - mean(dd_win,       na.rm = TRUE)
+      leverage_win = winsorize(leverage, p = p),
+      dd_win       = winsorize(dd, p = p),
+      lev_dm       = leverage_win - mean(leverage_win, na.rm = TRUE),
+      dd_dm        = dd_win       - mean(dd_win,       na.rm = TRUE)
     ) %>%
-    ungroup() %>%
-    mutate(
-      lev_std = (leverage_win - mean(leverage_win, na.rm = TRUE)) /
-        sd(leverage_win, na.rm = TRUE),
-      dd_std  = (dd_win       - mean(dd_win,       na.rm = TRUE)) /
-        sd(dd_win,       na.rm = TRUE)
-    )
+    ungroup()
 }
 
-# helper: winsorize, de-mean ("diazotizar"), and standardize the monetary shock
-prep_shock_var <- function(df) {
-  df <- df %>% mutate(shock_win = winsorize(shock))
-  
-  shock_mean <- mean(df$shock_win, na.rm = TRUE)
-  shock_sd   <- sd(df$shock_win, na.rm = TRUE)
-  shock_dev  <- df$shock_win - shock_mean
-  
-  if (!is.finite(shock_sd) || shock_sd == 0) {
-    warning("La desviación estándar del shock es cero o indefinida; se usará la versión diazotizada sin escalar.")
-    shock_std <- rep(NA_real_, length(shock_dev))
-    shock_use <- shock_dev
-  } else {
-    shock_std <- shock_dev / shock_sd
-    shock_use <- shock_std
+# helper: winsorize and standardize the monetary shock within country
+prep_shock_var <- function(df, p = 0.005) {
+  safe_zscore <- function(x) {
+    mu <- mean(x, na.rm = TRUE)
+    sigma <- sd(x, na.rm = TRUE)
+    
+    if (!is.finite(sigma) || sigma == 0) {
+      return(ifelse(is.na(x), NA_real_, 0))
+    }
+    
+    (x - mu) / sigma
   }
   
   df %>%
+    group_by(Country) %>%
     mutate(
-      shock_dev = shock_dev,
-      shock_std = shock_std,
-      shock     = shock_use
-    )
+      shock_win = winsorize(shock, p = p),
+      shock     = safe_zscore(shock_win)
+    ) %>%
+    ungroup()
 }
 
 # 1) Leer base de datos y convertir fecha a trimestral
@@ -164,8 +153,8 @@ if (!"sh_current_a_std" %in% names(df)) {
 # 2) Crear interacciones “raw” (winsorizadas) con el shock
 df <- df %>%
 mutate(
-       lev_shock = lev_std * shock,
-       d2d_shock = dd_std  * shock
+  lev_shock = lev_dm * shock,
+  d2d_shock = dd_dm  * shock
 )
 
 # 3) Construir cumFh_dlog_capital para h = 0…12
@@ -445,7 +434,7 @@ if (!"Ldl_capital" %in% names(df)) {
     ungroup()
 }
 
-# 2) Winsorizar, de-mediana y estandarizar leverage y dd
+# 2) Winsorizar y diazotizar leverage y dd dentro de firma
 # ------------------------------------------------------
 df <- prep_fin_vars(df)
 
@@ -454,15 +443,15 @@ df <- prep_fin_vars(df)
 if ("dlog_gdp" %in% names(df)) {
   df <- df %>%
     mutate(
-      lev_shock_gdp = lev_std * dlog_gdp,
-      d2d_shock_gdp = dd_std * dlog_gdp
+      lev_shock_gdp = lev_dm * dlog_gdp,
+      d2d_shock_gdp = dd_dm * dlog_gdp
     )
 }
 
 df <- df %>%
   mutate(
-    lev_shock = lev_std * shock,
-    d2d_shock = dd_std  * shock
+    lev_shock = lev_dm * shock,
+    d2d_shock = dd_dm  * shock
   )
 
 # 4) Construir cumFh_dlog_capital para h = 0…12
@@ -700,12 +689,12 @@ if (!"sh_current_a_std" %in% names(df)) {
     }) %>% ungroup()
 }
 
-# 3) Winsorizar, de-mediana y estandarizar leverage y dd; crear interacciones con el shock
-# ---------------------------------------------------------------------
+# 3) Winsorizar y diazotizar leverage y dd; crear interacciones con el shock
+# -------------------------------------------------------------------------
 df <- prep_fin_vars(df) %>%
   mutate(
-    lev_shock = lev_std * shock,
-    d2d_shock = dd_std  * shock
+    lev_shock = lev_dm * shock,
+    d2d_shock = dd_dm  * shock
   )
 
 # 4) Construir variables dinámicas cumFh_int_exp para h = 0…12
@@ -974,12 +963,12 @@ df_cntl13 <- df_cntl13 %>%
 # -------------------------------------------
 df_cntl13 <- df_cntl13 %>%
 mutate(
-       size_shock    = size_win * shock,
-       size_gdp      = size_win * dlog_gdp,
-       lev_shock     = lev_std * shock,
-       lev_shock_gdp = lev_std * dlog_gdp,
-       d2d_shock     = dd_std  * shock,
-       d2d_shock_gdp = dd_std  * dlog_gdp
+  size_shock    = size_win * shock,
+  size_gdp      = size_win * dlog_gdp,
+  lev_shock     = lev_dm * shock,
+  lev_shock_gdp = lev_dm * dlog_gdp,
+  d2d_shock     = dd_dm  * shock,
+  d2d_shock_gdp = dd_dm  * dlog_gdp
 )
 
 # 3) Construir dlog_capital y dinámicas cumFh_dlog_capital
