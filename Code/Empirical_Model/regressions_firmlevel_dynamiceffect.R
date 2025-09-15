@@ -26,23 +26,28 @@ library(kableExtra)
 
 
 # 0.1) winsorize “raw” para leverage y dd
-winsorize <- function(x, p = 0.005) {
-  lo <- quantile(x, p, na.rm = TRUE)
-  hi <- quantile(x, 1 - p, na.rm = TRUE)
+winsorize_asym <- function(x, pL = 0.02, pU = 0.005) {
+  lo <- stats::quantile(x, pL,     na.rm = TRUE)
+  hi <- stats::quantile(x, 1 - pU, na.rm = TRUE)
+  if (!is.finite(lo) || !is.finite(hi) || lo > hi) return(x)
   pmin(pmax(x, lo), hi)
 }
 
-# helper: winsorize and de-mean leverage and dd within firm
-prep_fin_vars <- function(df, p = 0.005) {
+# --- Helper: winsorize asimétrico y demean dentro de firma ---
+prep_fin_vars <- function(df,
+                          # dd: más recorte abajo por sesgo negativo
+                          pL_dd  = 0.02, pU_dd  = 0.005,
+                          # leverage: simétrico (puedes ajustar si hace falta)
+                          pL_lev = 0.02, pU_lev = 0.005) {
   df %>%
-    group_by(name) %>%
-    mutate(
-      leverage_win = winsorize(leverage, p = p),
-      dd_win       = winsorize(dd, p = p),
+    dplyr::group_by(name) %>%
+    dplyr::mutate(
+      leverage_win = winsorize_asym(leverage, pL = pL_lev, pU = pU_lev),
+      dd_win       = winsorize_asym(dd,       pL = pL_dd,  pU = pU_dd),
       lev_dm       = leverage_win - mean(leverage_win, na.rm = TRUE),
       dd_dm        = dd_win       - mean(dd_win,       na.rm = TRUE)
     ) %>%
-    ungroup()
+    dplyr::ungroup()
 }
 
 # helper: winsorize and standardize the monetary shock within country
@@ -159,14 +164,14 @@ mutate(
 
 # 3) Construir cumFh_dlog_capital para h = 0…12
 # --------------------------------------------------------
-vars_cap <- paste0("cumF", 0:24, "_dlog_capital")
+vars_cap <- paste0("cumF", 0:12, "_dlog_capital")
 if (!all(vars_cap %in% names(df))) {
   df_dyn_nocy <- df %>%
     group_by(name) %>%
     arrange(dateq) %>%
     group_modify(~ {
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[paste0("cumF", h, "_dlog_capital")]] <-
           rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
       }
@@ -183,35 +188,35 @@ controls_macro  <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names
 all_controls_nocy <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
 # 5) Estimar dinámicas h = 0…12 sin componente cíclico
-res_lev_nocy <- map(0:24, function(h) {
+res_lev_nocy <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls_nocy,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
-res_dd_nocy <- map(0:24, function(h) {
+res_dd_nocy <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls_nocy,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
 
 # 6) Extraer coeficientes y errores estándar
 dyn_lev_nocy <- tibble(
-  horizon = 0:24,
+  horizon = 0:12,
   beta    = map_dbl(res_lev_nocy, ~ coef(.x)["lev_shock"]),
   se      = map_dbl(res_lev_nocy, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
 )
 dyn_dd_nocy <- tibble(
-  horizon = 0:24,
+  horizon = 0:12,
   beta    = map_dbl(res_dd_nocy, ~ coef(.x)["d2d_shock"]),
   se      = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
@@ -220,10 +225,10 @@ dyn_dd_nocy <- tibble(
 p1 <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
   geom_line(size = 1, color = "firebrick") +
   geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta - 1.96 * se,
-                  ymax = beta + 1.96 * se),
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
               fill = "firebrick", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
      title    = "Panel (a): Heterogeneidad por apalancamiento (FE: Country+dateq)",
     subtitle = "Sin control cíclico",
@@ -235,10 +240,10 @@ p1 <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
 p2 <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
   geom_line(size = 1, color = "steelblue") +
   geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta - 1.96 * se,
-                  ymax = beta + 1.96 * se),
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
               fill = "steelblue", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title    = "Panel (b): Heterogeneidad por distancia al default (FE: Country+dateq)",
     subtitle = "Sin control cíclico",
@@ -271,35 +276,35 @@ df_dyn_cyc <- df_dyn_nocy %>%
 all_controls_cyc <- paste(c(controls_firm, controls_macro, "sens_cyc_shock"), collapse = " + ")
 
 # 4) Estimar dinámicas con componente cíclico
-res_lev_cyc <- map(0:24, function(h) {
+res_lev_cyc <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls_cyc,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn_cyc,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
-res_dd_cyc <- map(0:24, function(h) {
+res_dd_cyc <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls_cyc,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn_cyc,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
 
 # 5) Extraer coeficientes y errores estándar con control cíclico
 dyn_lev_cyc <- tibble(
-  horizon = 0:24,
+  horizon = 0:12,
   beta    = map_dbl(res_lev_cyc, ~ coef(.x)["lev_shock"]),
   se      = map_dbl(res_lev_cyc, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
 )
 dyn_dd_cyc <- tibble(
-  horizon = 0:24,
+  horizon = 0:12,
   beta    = map_dbl(res_dd_cyc, ~ coef(.x)["d2d_shock"]),
   se      = map_dbl(res_dd_cyc, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
@@ -308,10 +313,10 @@ dyn_dd_cyc <- tibble(
 p3 <- ggplot(dyn_lev_cyc, aes(x = horizon, y = beta)) +
   geom_line(size = 1, color = "firebrick") +
   geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta - 1.96 * se,
-                  ymax = beta + 1.96 * se),
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
               fill = "firebrick", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title    = "Panel (c): Heterogeneidad por apalancamiento (FE: Country+dateq)",
     subtitle = "Con control cíclico",
@@ -323,10 +328,10 @@ p3 <- ggplot(dyn_lev_cyc, aes(x = horizon, y = beta)) +
 p4 <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
   geom_line(size = 1, color = "steelblue") +
   geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta - 1.96 * se,
-                  ymax = beta + 1.96 * se),
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
               fill = "steelblue", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title    = "Panel (d): Heterogeneidad por distancia al default (FE: Country+dateq)",
     subtitle = "Con control cíclico",
@@ -352,14 +357,14 @@ print(figure1)
 
 # 3) Construir variables dinámicas cumFh_dlog_capital para h = 0…12
 # --------------------------------------------------------
-vars_cap <- paste0("cumF", 0:24, "_dlog_capital")
+vars_cap <- paste0("cumF", 0:12, "_dlog_capital")
 df_dyn <- if (!all(vars_cap %in% names(df))) {
   df %>%
     group_by(name) %>%
     arrange(dateq) %>%
     group_modify(~ {
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[paste0("cumF", h, "_dlog_capital")]] <-
           rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
       }
@@ -378,20 +383,20 @@ all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
 # 5) Estimar respuesta promedio al shock (horizonte 0–12)
 # --------------------------------------------------------
-res_avg <- map(0:24, function(h) {
+res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
     " ~ shock + lev_shock + d2d_shock + ", all_controls,
-    " | Country + dateq"
+    " | name + sec + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country + dateq)
+  feols(fml, data = df_dyn, cluster = ~ Country)
 })
 
 # 6) Extraer coeficientes y errores estándar para 'shock'
 # -------------------------------------------------------
 avg_coefs <- tibble::tibble(
-  horizon    = 0:24,
+  horizon    = 0:12,
   beta_shock = map_dbl(res_avg, ~ coef(.x)["shock"]),
   se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock","shock"]))
 )
@@ -402,10 +407,10 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   geom_line(size = 1, color = "darkgreen") +
   geom_point(size = 2, color = "darkgreen") +
   geom_ribbon(aes(
-    ymin = beta_shock - 1.96 * se_shock,
-    ymax = beta_shock + 1.96 * se_shock
+    ymin = beta_shock - 1.645 * se_shock,
+    ymax = beta_shock + 1.645 * se_shock
   ), alpha = 0.2, fill = "darkgreen") +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Figura 3: Respuesta Dinámica de la Inversión Neta ante un Shock Monetario (FE: Country+dateq)",
     x     = "Trimestres",
@@ -456,14 +461,14 @@ df <- df %>%
 
 # 4) Construir cumFh_dlog_capital para h = 0…12
 # --------------------------------------
-vars_cap11 <- paste0("cumF", 0:24, "_dlog_capital")
+vars_cap11 <- paste0("cumF", 0:12, "_dlog_capital")
 df_dyn11 <- if (!all(vars_cap11 %in% names(df))) {
   df %>%
     group_by(name) %>%
     arrange(dateq) %>%
     group_modify(~ {
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[paste0("cumF", h, "_dlog_capital")]] <-
           rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
       }
@@ -485,7 +490,7 @@ base_controls  <- c(controls_firm, controls_macro)
 has_lev_gdp <- "lev_shock_gdp" %in% names(df_dyn11)
 has_dd_gdp  <- "d2d_shock_gdp" %in% names(df_dyn11)
 
-res_lev_lag <- map(0:24, function(h) {
+res_lev_lag <- map(0:12, function(h) {
   dep_var   <- paste0("cumF", h, "_dlog_capital")
   rhs_terms <- c(
     if (has_lev_gdp) "lev_shock_gdp",
@@ -494,10 +499,10 @@ res_lev_lag <- map(0:24, function(h) {
     base_controls
   )
   fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| Country + dateq")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq)
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country)
 })
 
-res_dd_lag <- map(0:24, function(h) {
+res_dd_lag <- map(0:12, function(h) {
   dep_var   <- paste0("cumF", h, "_dlog_capital")
   rhs_terms <- c(
     if (has_dd_gdp) "d2d_shock_gdp",
@@ -506,19 +511,19 @@ res_dd_lag <- map(0:24, function(h) {
     base_controls
   )
   fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| Country + dateq")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq)
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country)
 })
 
 # 7) Extraer coeficientes y errores para plot
 # --------------------------------------
 coef_lev_lag <- tibble(
-  horizon    = 0:24,
+  horizon    = 0:12,
   beta_shock = map_dbl(res_lev_lag, ~ coef(.x)["lev_shock"]),
   se_shock   = map_dbl(res_lev_lag, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
 )
 
 coef_dd_lag <- tibble(
-  horizon    = 0:24,
+  horizon    = 0:12,
   beta_shock = map_dbl(res_dd_lag, ~ coef(.x)["d2d_shock"]),
   se_shock   = map_dbl(res_dd_lag, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
@@ -528,10 +533,10 @@ coef_dd_lag <- tibble(
 p11a <- ggplot(coef_lev_lag, aes(x = horizon, y = beta_shock)) +
   geom_line(size = 1, color = "firebrick") +
   geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta_shock - 1.96 * se_shock,
-                  ymax = beta_shock + 1.96 * se_shock),
+  geom_ribbon(aes(ymin = beta_shock - 1.645 * se_shock,
+                  ymax = beta_shock + 1.645 * se_shock),
               fill = "firebrick", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Panel (a): Heterogeneidad por apalancamiento (FE: Country+dateq)",
     x     = "Trimestres",
@@ -542,10 +547,10 @@ p11a <- ggplot(coef_lev_lag, aes(x = horizon, y = beta_shock)) +
 p11b <- ggplot(coef_dd_lag, aes(x = horizon, y = beta_shock)) +
   geom_line(size = 1, color = "steelblue") +
   geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta_shock - 1.96 * se_shock,
-                  ymax = beta_shock + 1.96 * se_shock),
+  geom_ribbon(aes(ymin = beta_shock - 1.645 * se_shock,
+                  ymax = beta_shock + 1.645 * se_shock),
               fill = "steelblue", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Panel (b): Heterogeneidad por distancia al default (FE: Country+dateq)",
     x     = "Trimestres",
@@ -579,14 +584,14 @@ if (!"Ldl_capital" %in% names(df)) {
 
 # 4) Construir variables dinámicas cumFh_dlog_capital para h = 0…12
 # --------------------------------------------------------
-vars_cap <- paste0("cumF", 0:24, "_dlog_capital")
+vars_cap <- paste0("cumF", 0:12, "_dlog_capital")
 df_dyn <- if (!all(vars_cap %in% names(df))) {
   df %>%
     group_by(name) %>%
     arrange(dateq) %>%
     group_modify(~ {
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[paste0("cumF", h, "_dlog_capital")]] <-
           rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
       }
@@ -605,20 +610,20 @@ all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
 # 6) Estimar respuesta promedio al shock (horizonte 0–12) con Ldl_capital
 # --------------------------------------------------------
-res_avg <- map(0:24, function(h) {
+res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
     " ~ shock + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
-    " | Country + dateq"
+    " | name + sec + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country + dateq)
+  feols(fml, data = df_dyn, cluster = ~ Country)
 })
 
 # 7) Extraer coeficientes y errores estándar para 'shock'
 # -------------------------------------------------------
 avg_coefs <- tibble::tibble(
-  horizon    = 0:24,
+  horizon    = 0:12,
   beta_shock = map_dbl(res_avg, ~ coef(.x)["shock"]),
   se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock","shock"]))
 )
@@ -629,10 +634,10 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   geom_line(size = 1, color = "purple") +
   geom_point(size = 2, color = "purple") +
   geom_ribbon(aes(
-    ymin = beta_shock - 1.96 * se_shock,
-    ymax = beta_shock + 1.96 * se_shock
+    ymin = beta_shock - 1.645 * se_shock,
+    ymax = beta_shock + 1.645 * se_shock
   ), alpha = 0.2, fill = "purple") +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Figura 7: Respuesta Dinámica de la Inversión Neta residual ante un Shock Monetario (FE: Country+dateq)",
     x     = "Trimestres",
@@ -699,14 +704,14 @@ df <- prep_fin_vars(df) %>%
 
 # 4) Construir variables dinámicas cumFh_int_exp para h = 0…12
 # -------------------------------------------------------------
-dyn_vars <- paste0("cumF", 0:24, "_int_exp")
+dyn_vars <- paste0("cumF", 0:12, "_int_exp")
 df_dyn <- if (!all(dyn_vars %in% names(df))) {
   df %>%
     group_by(name) %>%
     arrange(dateq) %>%
     group_modify(~ {
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[dyn_vars[h+1]]] <-
           rowSums(map_dfc(0:h, ~ lead(tmp$int_exp, .x)), na.rm = TRUE)
       }
@@ -731,36 +736,36 @@ all_controls <- paste(c(controls_firm, present_macro), collapse = " + ")
 
 # 6) Estimar dinámicas para h = 0…12 (coeficiente × choque “raw”)
 # --------------------------------------------------------
-res_IR_lev <- map(0:24, function(h) {
+res_IR_lev <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       dyn_vars[h+1], " ~ lev_shock + ", all_controls,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
-res_IR_dd <- map(0:24, function(h) {
+res_IR_dd <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       dyn_vars[h+1], " ~ d2d_shock + ", all_controls,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
 
 # 7) Extraer coeficientes y errores estándar
 # --------------------------------------------------------
 IR_lev <- tibble(
-  horizon = 0:24,
+  horizon = 0:12,
   beta_lev = map_dbl(res_IR_lev, ~ coef(.x)["lev_shock"]),
   se_lev   = map_dbl(res_IR_lev, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
 )
 IR_dd <- tibble(
-  horizon = 0:24,
+  horizon = 0:12,
   beta_dd  = map_dbl(res_IR_dd,  ~ coef(.x)["d2d_shock"]),
   se_dd    = map_dbl(res_IR_dd,  ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
@@ -785,10 +790,10 @@ table_IR %>%
 p_lev <- ggplot(IR_lev, aes(x = horizon, y = beta_lev)) +
   geom_line(size = 0.8, color = "firebrick") +
   geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta_lev - 1.96*se_lev,
-                  ymax = beta_lev + 1.96*se_lev),
+  geom_ribbon(aes(ymin = beta_lev - 1.645*se_lev,
+                  ymax = beta_lev + 1.645*se_lev),
               alpha = 0.2, fill = "firebrick") +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(title = "Heterogeneidad por apalancamiento (FE: Country+dateq)", x = "Trimestres",
        y = "Δ pagos de interés acumulados") +
   theme_minimal()
@@ -796,10 +801,10 @@ p_lev <- ggplot(IR_lev, aes(x = horizon, y = beta_lev)) +
 p_dd <- ggplot(IR_dd, aes(x = horizon, y = beta_dd)) +
   geom_line(size = 0.8, color = "steelblue") +
   geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta_dd - 1.96*se_dd,
-                  ymax = beta_dd + 1.96*se_dd),
+  geom_ribbon(aes(ymin = beta_dd - 1.645*se_dd,
+                  ymax = beta_dd + 1.645*se_dd),
               alpha = 0.2, fill = "steelblue") +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(title = "Heterogeneidad por distancia al default (FE: Country+dateq)", x = "Trimestres",
        y = "Δ pagos de interés acumulados") +
   theme_minimal()
@@ -865,14 +870,14 @@ if ("shock" %in% names(df_cntl)) {
 
 # 3) Construir dinámicas acumuladas cumFh_dlog_capital para h = 0…12
 # ------------------------------------------------------------------
-vars_cum <- paste0("cumF", 0:24, "_dlog_capital")
+vars_cum <- paste0("cumF", 0:12, "_dlog_capital")
 df_dyn12 <- if (!all(vars_cum %in% names(df_cntl))) {
   df_cntl %>%
     group_by(name) %>%
     arrange(dateq, .by_group = TRUE) %>%
     group_modify(~{
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[ vars_cum[h+1] ]] <-
           rowSums(map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)), na.rm = TRUE)
       }
@@ -899,21 +904,21 @@ all_controls <- paste(c(controls_firm, present_macro), collapse = " + ")
 
 # 5) Estimar efecto heterogéneo size × shock para h = 0…12
 # ---------------------------------------------------------
-res_size <- map(0:24, function(h) {
+res_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars_cum[h+1], " ~ size_shock + ", all_controls,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn12,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
 
 # 6) Extraer coeficiente y error estándar de size_shock
 # ------------------------------------------------------
 coef_size <- tibble(
-  horizon    = 0:24,
+  horizon    = 0:12,
   beta_shock = map_dbl(res_size, ~ coef(.x)["size_shock"]),
   se_shock   = map_dbl(res_size, ~ sqrt(vcov(.x)["size_shock", "size_shock"]))
 )
@@ -924,10 +929,10 @@ ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
   geom_line(size = 1, color = "orange") +
   geom_point(size = 2, color = "orange") +
   geom_ribbon(aes(
-    ymin = beta_shock - 1.96 * se_shock,
-    ymax = beta_shock + 1.96 * se_shock
+    ymin = beta_shock - 1.645 * se_shock,
+    ymax = beta_shock + 1.645 * se_shock
   ), alpha = 0.2, fill = "orange") +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Figura 10: Heterogeneidad de la inversion por tamaño de empresa (FE: Country+dateq)",
     x     = "Trimestres",
@@ -973,14 +978,14 @@ df_cntl13 <- df_cntl13 %>%
 
 # 3) Construir dlog_capital y dinámicas cumFh_dlog_capital
 # ---------------------------------------------------------
-vars13 <- paste0("cumF", 0:24, "_dlog_capital")
+vars13 <- paste0("cumF", 0:12, "_dlog_capital")
 df_dyn13 <- if (!all(vars13 %in% names(df_cntl13))) {
   df_cntl13 %>%
     group_by(name) %>%
     arrange(dateq) %>%
     group_modify(~ {
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[vars13[h+1]]] <- rowSums(
           map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
           na.rm = TRUE
@@ -998,35 +1003,35 @@ controls_macro13 <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), name
 all_controls13   <- paste(c(controls_firm13, controls_macro13), collapse = " + ")
 
 # 4a) Estimar dinámica Size + Leverage
-res_lev_size <- map(0:24, function(h) {
+res_lev_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars13[h+1],
       " ~ size_shock + lev_shock + lev_shock_gdp + ", all_controls13,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
 
 # 4b) Estimar dinámica Size + DD
-res_dd_size <- map(0:24, function(h) {
+res_dd_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars13[h+1],
       " ~ size_shock + d2d_shock + d2d_shock_gdp + ", all_controls13,
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
 
 # 5) Extraer coeficientes y errores
 # ----------------------------------
 lev_size_coefs <- tibble(
-  horizon   = 0:24,
+  horizon   = 0:12,
   beta_size = map_dbl(res_lev_size, ~ coef(.x)["size_shock"]),
   se_size   = map_dbl(res_lev_size, ~ sqrt(vcov(.x)["size_shock","size_shock"])),
   beta_lev  = map_dbl(res_lev_size, ~ coef(.x)["lev_shock"]),
@@ -1034,7 +1039,7 @@ lev_size_coefs <- tibble(
 )
 
 dd_size_coefs <- tibble(
-  horizon   = 0:24,
+  horizon   = 0:12,
   beta_size = map_dbl(res_dd_size, ~ coef(.x)["size_shock"]),
   se_size   = map_dbl(res_dd_size, ~ sqrt(vcov(.x)["size_shock","size_shock"])),
   beta_dd   = map_dbl(res_dd_size, ~ coef(.x)["d2d_shock"]),
@@ -1044,8 +1049,8 @@ dd_size_coefs <- tibble(
 # 5a) Gráfico Size × Shock
 p13a <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_size)) +
   geom_line(size = 1, color = "darkgreen") +
-  geom_ribbon(aes(ymin = beta_size - 1.96 * se_size,
-                  ymax = beta_size + 1.96 * se_size),
+  geom_ribbon(aes(ymin = beta_size - 1.645 * se_size,
+                  ymax = beta_size + 1.645 * se_size),
               fill = "darkgreen", alpha = 0.2) +
     labs(title = "Panel (a): Heterogeneidad por tamaño (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
   theme_minimal()
@@ -1053,8 +1058,8 @@ p13a <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_size)) +
 # 5b) Gráfico Leverage × Shock
 p13b <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_lev)) +
   geom_line(size = 1, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta_lev - 1.96 * se_lev,
-                  ymax = beta_lev + 1.96 * se_lev),
+  geom_ribbon(aes(ymin = beta_lev - 1.645 * se_lev,
+                  ymax = beta_lev + 1.645 * se_lev),
               fill = "firebrick", alpha = 0.2) +
     labs(title = "Panel (b): Heterogeneidad por apalancamiento (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
   theme_minimal()
@@ -1062,8 +1067,8 @@ p13b <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_lev)) +
 # 5c) Gráfico DD × Shock
 p13c <- ggplot(dd_size_coefs, aes(x = horizon, y = beta_dd)) +
   geom_line(size = 1, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta_dd - 1.96 * se_dd,
-                  ymax = beta_dd + 1.96 * se_dd),
+  geom_ribbon(aes(ymin = beta_dd - 1.645 * se_dd,
+                  ymax = beta_dd + 1.645 * se_dd),
               fill = "steelblue", alpha = 0.2) +
     labs(title = "Panel (c): Heterogeneidad por distancia al default (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
   theme_minimal()
@@ -1156,14 +1161,14 @@ df_cntl21 <- df_cntl21 %>%
 
 # 5) Dinámicas acumuladas cumFh_dlog_capital h=0…12
 #----------------------------------------------------
-vars21 <- paste0("cumF", 0:24, "_dlog_capital")
+vars21 <- paste0("cumF", 0:12, "_dlog_capital")
 df_dyn21 <- if (!all(vars21 %in% names(df_cntl21))) {
   df_cntl21 %>%
     group_by(name) %>%
     arrange(dateq) %>%
     group_modify(~{
       tmp <- .x
-      for (h in 0:24) {
+      for (h in 0:12) {
         tmp[[vars21[h+1]]] <- rowSums(
           map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
           na.rm = TRUE
@@ -1183,23 +1188,23 @@ all_controls21   <- paste(c(controls_firm21, controls_macro21), collapse = " + "
 # 7) Estimar dinámicas para h = 0…12
 # ------------------------------------
 has_vol_gdp <- "vol5_win_gdp" %in% names(df_dyn21)
-res21 <- map(0:24, function(h) {
+res21 <- map(0:12, function(h) {
   rhs <- c(if (has_vol_gdp) "vol5_win_gdp", "vol5_win_shock", all_controls21)
   feols(
     as.formula(paste0(
       vars21[h+1], " ~ ",
       paste(rhs, collapse = " + "),
-      " | Country + dateq"
+      " | name + sec + dateq"
     )),
     data    = df_dyn21,
-    cluster = ~ Country + dateq
+    cluster = ~ Country
   )
 })
 
 # 8) Extraer coeficientes y errores
 # -------------------------------------
 tbl21 <- tibble(
-  horizon        = 0:24,
+  horizon        = 0:12,
   beta_vol_shock = map_dbl(res21, ~ coef(.x)["vol5_win_shock"]),
   se_vol_shock   = map_dbl(res21, ~ sqrt(vcov(.x)["vol5_win_shock","vol5_win_shock"]))
 )
@@ -1208,10 +1213,10 @@ tbl21 <- tibble(
 # --------------
 ggplot(tbl21, aes(x = horizon, y = beta_vol_shock)) +
   geom_line(size = 1, color = "purple") +
-  geom_ribbon(aes(ymin = beta_vol_shock - 1.96*se_vol_shock,
-                  ymax = beta_vol_shock + 1.96*se_vol_shock),
+  geom_ribbon(aes(ymin = beta_vol_shock - 1.645*se_vol_shock,
+                  ymax = beta_vol_shock + 1.645*se_vol_shock),
               alpha = 0.2, fill = "purple") +
-  scale_x_continuous(breaks = 0:24) +
+  scale_x_continuous(breaks = 0:12) +
   labs(
     title = "Figura 21: Heterogeneidad por volatilidad de los ultimos 5 años de la inversion neta (FE: Country+dateq)",
     x     = "Horizonte (trimestres)",
