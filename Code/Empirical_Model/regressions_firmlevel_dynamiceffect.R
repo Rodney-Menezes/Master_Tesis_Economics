@@ -216,35 +216,35 @@ dyn_dd_nocy <- tibble(
   se      = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
 
-# 7) Graficar sin control cíclico␊
+# 7) Graficar sin control cíclico
 p_lev_nocy <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
-  geom_line(size = 1, color = "firebrick") +␊
-  geom_point(size = 2, color = "firebrick") +␊
-  geom_ribbon(aes(ymin = beta - 1.645 * se,␊
-                  ymax = beta + 1.645 * se),␊
-              fill = "firebrick", alpha = 0.2) +␊
-  scale_x_continuous(breaks = 0:12) +␊
-  labs(␊
-     title    = "Panel (a): Heterogeneidad por apalancamiento",␊
-    subtitle = "Sin control cíclico",␊
-    x        = "Trimestres",␊
-    y        = "Efecto acumulado de inversión"␊
-  ) +␊
-  theme_minimal()␊
-␊
+  geom_line(size = 1, color = "firebrick") +
+  geom_point(size = 2, color = "firebrick") +
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
+              fill = "firebrick", alpha = 0.2) +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
+     title    = "Panel (a): Heterogeneidad por apalancamiento",
+    subtitle = "Sin control cíclico",
+    x        = "Trimestres",
+    y        = "Efecto acumulado de inversión"
+  ) +
+  theme_minimal()
+
 p_dd_nocy <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
-  geom_line(size = 1, color = "steelblue") +␊
-  geom_point(size = 2, color = "steelblue") +␊
-  geom_ribbon(aes(ymin = beta - 1.645 * se,␊
-                  ymax = beta + 1.645 * se),␊
-              fill = "steelblue", alpha = 0.2) +␊
-  scale_x_continuous(breaks = 0:12) +␊
-  labs(␊
+  geom_line(size = 1, color = "steelblue") +
+  geom_point(size = 2, color = "steelblue") +
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
+              fill = "steelblue", alpha = 0.2) +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
     title    = "Panel (a): Heterogeneidad por distancia al default",
-    subtitle = "Sin control cíclico",␊
-    x        = "Trimestres",␊
-    y        = "Efecto acumulado de inversión"␊
-  ) +␊
+    subtitle = "Sin control cíclico",
+    x        = "Trimestres",
+    y        = "Efecto acumulado de inversión"
+  ) +
   theme_minimal()
 
 # Parte 2: Con controles cíclicos
