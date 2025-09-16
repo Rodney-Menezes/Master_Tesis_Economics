@@ -216,35 +216,35 @@ dyn_dd_nocy <- tibble(
   se      = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
 
-# 7) Graficar sin control cíclico
-p1 <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
-  geom_line(size = 1, color = "firebrick") +
-  geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta - 1.645 * se,
-                  ymax = beta + 1.645 * se),
-              fill = "firebrick", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-     title    = "Panel (a): Heterogeneidad por apalancamiento",
-    subtitle = "Sin control cíclico",
-    x        = "Trimestres",
-    y        = "Efecto acumulado de inversión"
-  ) +
-  theme_minimal()
-
-p2 <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
-  geom_line(size = 1, color = "steelblue") +
-  geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta - 1.645 * se,
-                  ymax = beta + 1.645 * se),
-              fill = "steelblue", alpha = 0.2) +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title    = "Panel (b): Heterogeneidad por distancia al default",
-    subtitle = "Sin control cíclico",
-    x        = "Trimestres",
-    y        = "Efecto acumulado de inversión"
-  ) +
+# 7) Graficar sin control cíclico␊
+p_lev_nocy <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
+  geom_line(size = 1, color = "firebrick") +␊
+  geom_point(size = 2, color = "firebrick") +␊
+  geom_ribbon(aes(ymin = beta - 1.645 * se,␊
+                  ymax = beta + 1.645 * se),␊
+              fill = "firebrick", alpha = 0.2) +␊
+  scale_x_continuous(breaks = 0:12) +␊
+  labs(␊
+     title    = "Panel (a): Heterogeneidad por apalancamiento",␊
+    subtitle = "Sin control cíclico",␊
+    x        = "Trimestres",␊
+    y        = "Efecto acumulado de inversión"␊
+  ) +␊
+  theme_minimal()␊
+␊
+p_dd_nocy <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
+  geom_line(size = 1, color = "steelblue") +␊
+  geom_point(size = 2, color = "steelblue") +␊
+  geom_ribbon(aes(ymin = beta - 1.645 * se,␊
+                  ymax = beta + 1.645 * se),␊
+              fill = "steelblue", alpha = 0.2) +␊
+  scale_x_continuous(breaks = 0:12) +␊
+  labs(␊
+    title    = "Panel (a): Heterogeneidad por distancia al default",
+    subtitle = "Sin control cíclico",␊
+    x        = "Trimestres",␊
+    y        = "Efecto acumulado de inversión"␊
+  ) +␊
   theme_minimal()
 
 # Parte 2: Con controles cíclicos
@@ -305,7 +305,7 @@ dyn_dd_cyc <- tibble(
 )
 
 # 6) Graficar con control cíclico
-p3 <- ggplot(dyn_lev_cyc, aes(x = horizon, y = beta)) +
+p_lev_cyc <- ggplot(dyn_lev_cyc, aes(x = horizon, y = beta)) +
   geom_line(size = 1, color = "firebrick") +
   geom_point(size = 2, color = "firebrick") +
   geom_ribbon(aes(ymin = beta - 1.645 * se,
@@ -313,14 +313,14 @@ p3 <- ggplot(dyn_lev_cyc, aes(x = horizon, y = beta)) +
               fill = "firebrick", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (c): Heterogeneidad por apalancamiento",
+    title    = "Panel (b): Heterogeneidad por apalancamiento",
     subtitle = "Con control cíclico",
     x        = "Trimestres",
     y        = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
-p4 <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
+p_dd_cyc <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
   geom_line(size = 1, color = "steelblue") +
   geom_point(size = 2, color = "steelblue") +
   geom_ribbon(aes(ymin = beta - 1.645 * se,
@@ -328,20 +328,26 @@ p4 <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
               fill = "steelblue", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (d): Heterogeneidad por distancia al default",
+    title    = "Panel (b): Heterogeneidad por distancia al default",
     subtitle = "Con control cíclico",
     x        = "Trimestres",
     y        = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
-# 7) Montaje final en 2×2
-figure1 <- (p1 | p2) / (p3 | p4) +
+# 7) Montaje final en dos figuras (Figura 1a y Figura 1b)
+figure1a <- (p_lev_nocy | p_lev_cyc) +
   plot_annotation(
-    title = "Figura 1: Heterogeneidad financiera en la dinámica de la inversión ante un shock monetario expansivo"
+    title = "Figura 1a: Heterogeneidad por apalancamiento en la dinámica de la inversión ante un shock monetario expansivo"
   )
 
-print(figure1)
+figure1b <- (p_dd_nocy | p_dd_cyc) +
+  plot_annotation(
+    title = "Figura 1b: Heterogeneidad por distancia al default en la dinámica de la inversión ante un shock monetario expansivo"
+  )
+
+print(figure1a)
+print(figure1b)
 
 
 
