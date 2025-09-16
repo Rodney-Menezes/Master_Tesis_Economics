@@ -26,26 +26,21 @@ library(kableExtra)
 
 
 # 0.1) winsorize “raw” para leverage y dd
-winsorize_asym <- function(x, pL = 0.02, pU = 0.005) {
-  lo <- stats::quantile(x, pL,     na.rm = TRUE)
-  hi <- stats::quantile(x, 1 - pU, na.rm = TRUE)
-  if (!is.finite(lo) || !is.finite(hi) || lo > hi) return(x)
+winsorize <- function(x, p = 0.005) {
+  lo <- quantile(x, p, na.rm = TRUE)
+  hi <- quantile(x, 1 - p, na.rm = TRUE)
   pmin(pmax(x, lo), hi)
 }
 
-# --- Helper: winsorize asimétrico y demean dentro de firma ---
-prep_fin_vars <- function(df,
-                          # dd: más recorte abajo por sesgo negativo
-                          pL_dd  = 0.02, pU_dd  = 0.005,
-                          # leverage: simétrico (puedes ajustar si hace falta)
-                          pL_lev = 0.02, pU_lev = 0.005) {
+# helper: winsorize y de-mean leverage y dd dentro de cada firma
+prep_fin_vars <- function(df, p = 0.005) {
   df %>%
     dplyr::group_by(name) %>%
     dplyr::mutate(
-      leverage_win = winsorize_asym(leverage, pL = pL_lev, pU = pU_lev),
-      dd_win       = winsorize_asym(dd,       pL = pL_dd,  pU = pU_dd),
+      leverage_win = winsorize(leverage, p = p),
+      dd_win       = winsorize(dd, p = p),
       lev_dm       = leverage_win - mean(leverage_win, na.rm = TRUE),
-      dd_dm        = dd_win       - mean(dd_win,       na.rm = TRUE)
+      dd_dm        = dd_win - mean(dd_win, na.rm = TRUE)
     ) %>%
     dplyr::ungroup()
 }
@@ -230,10 +225,10 @@ p1 <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
               fill = "firebrick", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-     title    = "Panel (a): Heterogeneidad por apalancamiento (FE: Country+dateq)",
+     title    = "Panel (a): Heterogeneidad por apalancamiento",
     subtitle = "Sin control cíclico",
     x        = "Trimestres",
-    y        = "Efecto acumulado de inversión neta"
+    y        = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
@@ -245,10 +240,10 @@ p2 <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
               fill = "steelblue", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (b): Heterogeneidad por distancia al default (FE: Country+dateq)",
+    title    = "Panel (b): Heterogeneidad por distancia al default",
     subtitle = "Sin control cíclico",
     x        = "Trimestres",
-    y        = "Efecto acumulado de inversión neta"
+    y        = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
@@ -318,10 +313,10 @@ p3 <- ggplot(dyn_lev_cyc, aes(x = horizon, y = beta)) +
               fill = "firebrick", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (c): Heterogeneidad por apalancamiento (FE: Country+dateq)",
+    title    = "Panel (c): Heterogeneidad por apalancamiento",
     subtitle = "Con control cíclico",
     x        = "Trimestres",
-    y        = "Efecto acumulado de inversión neta"
+    y        = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
@@ -333,17 +328,17 @@ p4 <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
               fill = "steelblue", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title    = "Panel (d): Heterogeneidad por distancia al default (FE: Country+dateq)",
+    title    = "Panel (d): Heterogeneidad por distancia al default",
     subtitle = "Con control cíclico",
     x        = "Trimestres",
-    y        = "Efecto acumulado de inversión neta"
+    y        = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
 # 7) Montaje final en 2×2
 figure1 <- (p1 | p2) / (p3 | p4) +
   plot_annotation(
-    title = "Figura 1: Heterogeneidad financiera en la dinámica de la inversión neta ante un shock monetario expansivo (FE: Country+dateq)"
+    title = "Figura 1: Heterogeneidad financiera en la dinámica de la inversión ante un shock monetario expansivo"
   )
 
 print(figure1)
@@ -351,7 +346,7 @@ print(figure1)
 
 
 # =================================================================
-# Figure 3: Respuesta Promedio de Inversión neta al Shock Monetario
+# Figure 2: Respuesta Promedio de Inversión neta al Shock Monetario
 # =================================================================
 
 
@@ -412,9 +407,9 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   ), alpha = 0.2, fill = "darkgreen") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 3: Respuesta Dinámica de la Inversión Neta ante un Shock Monetario (FE: Country+dateq)",
+    title = "Figura 2: Respuesta Dinámica de la Inversión ante un Shock Monetario",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión neta"
+    y     = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
@@ -424,7 +419,7 @@ print(p_avg)
 
 
 # ===================================================================================
-# Figura 5: Dinámica heterognea de Inversión Neta Controlando por Inversión Rezagada
+# Figura 3: Dinámica heterognea de Inversión Neta Controlando por Inversión Rezagada
 # ===================================================================================
 
 
@@ -498,7 +493,7 @@ res_lev_lag <- map(0:12, function(h) {
     "Ldl_capital",
     base_controls
   )
-  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| Country + dateq")
+  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + dateq")
   feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country)
 })
 
@@ -510,7 +505,7 @@ res_dd_lag <- map(0:12, function(h) {
     "Ldl_capital",
     base_controls
   )
-  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| Country + dateq")
+  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + dateq")
   feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country)
 })
 
@@ -538,9 +533,9 @@ p11a <- ggplot(coef_lev_lag, aes(x = horizon, y = beta_shock)) +
               fill = "firebrick", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Panel (a): Heterogeneidad por apalancamiento (FE: Country+dateq)",
+    title = "Panel (a): Heterogeneidad por apalancamiento",
     x     = "Trimestres",
-    y     = "Efecto acumulado de la inversion neta residual"
+    y     = "Efecto acumulado de la inversion residual"
   ) +
   theme_minimal()
 
@@ -552,9 +547,9 @@ p11b <- ggplot(coef_dd_lag, aes(x = horizon, y = beta_shock)) +
               fill = "steelblue", alpha = 0.2) +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Panel (b): Heterogeneidad por distancia al default (FE: Country+dateq)",
+    title = "Panel (b): Heterogeneidad por distancia al default",
     x     = "Trimestres",
-    y     = "Efecto acumulado de la inversion neta residual"
+    y     = "Efecto acumulado de la inversion residual"
   ) +
   theme_minimal()
 
@@ -562,7 +557,7 @@ p11b <- ggplot(coef_dd_lag, aes(x = horizon, y = beta_shock)) +
 # --------------------------------------
 (p11a / p11b) +
   plot_annotation(
-    title = "Figura 5: Heterogeneidad financiera en la dinámica de la inversión neta residual ante un shock monetario expansivo (FE: Country+dateq)"
+    title = "Figura 3: Heterogeneidad financiera en la dinámica de la inversión residual ante un shock monetario expansivo"
   )
 
 
@@ -639,184 +634,17 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   ), alpha = 0.2, fill = "purple") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 7: Respuesta Dinámica de la Inversión Neta residual ante un Shock Monetario (FE: Country+dateq)",
+    title = "Figura 4: Respuesta Dinámica de la Inversión residual ante un Shock Monetario",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión neta residual"
+    y     = "Efecto acumulado de inversión residual"
   ) +
   theme_minimal()
 
 print(p_avg)
 
 
-
-# Para Anexos *(Falta corregir esto)*
-#--------------------------------------
-
-
-
-
 # ======================================================================
-# Figure 9: Respuestas dinámicas y heterogeneas de los pagos de interés
-# ======================================================================
-
-
-# 1) Crear int_exp (pagos de interés) si no existe
-# --------------------------------------------------------
-if (!"int_exp" %in% names(df)) {
-  df <- df %>% mutate(int_exp = oiadpq)
-}
-
-# 2) Controles firm-level
-# --------------------------------------------------------
-if (!"rsales_g_std" %in% names(df)) {
-  df <- df %>%
-    group_by(name) %>% arrange(dateq) %>%
-    mutate(rsales_g_std = {
-      x <- log(saleq) - log(lag(saleq))
-      (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
-    }) %>% ungroup()
-}
-if (!"size_index" %in% names(df)) {
-  df <- df %>%
-    group_by(name) %>% arrange(dateq) %>%
-    mutate(size_index = {
-      tmp <- ((log(atq) - mean(log(atq), na.rm=TRUE)) / sd(log(atq), na.rm=TRUE) +
-                (saleq - mean(saleq, na.rm=TRUE))    / sd(saleq,    na.rm=TRUE)) / 2
-      (tmp - mean(tmp, na.rm=TRUE)) / sd(tmp, na.rm=TRUE)
-    }) %>% ungroup()
-}
-if (!"sh_current_a_std" %in% names(df)) {
-  df <- df %>%
-    group_by(name) %>% arrange(dateq) %>%
-    mutate(sh_current_a_std = {
-      x <- current_ratio
-      (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
-    }) %>% ungroup()
-}
-
-# 3) Winsorizar y diazotizar leverage y dd; crear interacciones con el shock
-# -------------------------------------------------------------------------
-df <- prep_fin_vars(df) %>%
-  mutate(
-    lev_shock = lev_dm * shock,
-    d2d_shock = dd_dm  * shock
-  )
-
-# 4) Construir variables dinámicas cumFh_int_exp para h = 0…12
-# -------------------------------------------------------------
-dyn_vars <- paste0("cumF", 0:12, "_int_exp")
-df_dyn <- if (!all(dyn_vars %in% names(df))) {
-  df %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    group_modify(~ {
-      tmp <- .x
-      for (h in 0:12) {
-        tmp[[dyn_vars[h+1]]] <-
-          rowSums(map_dfc(0:h, ~ lead(tmp$int_exp, .x)), na.rm = TRUE)
-      }
-      tmp
-    }) %>%
-    ungroup()
-} else {
-  df
-}
-
-# 5) Definir controles firm-level y macro contemporáneos
-# --------------------------------------------------------
-controls_firm  <- c("rsales_g_std", "size_index", "sh_current_a_std")
-controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
-present_macro  <- intersect(controls_macro, names(df_dyn))
-if (length(present_macro) < length(controls_macro)) {
-  warning("Faltan controles macro: ",
-          paste(setdiff(controls_macro, present_macro), collapse = ", "),
-          ". Se omitirán.")
-}
-all_controls <- paste(c(controls_firm, present_macro), collapse = " + ")
-
-# 6) Estimar dinámicas para h = 0…12 (coeficiente × choque “raw”)
-# --------------------------------------------------------
-res_IR_lev <- map(0:12, function(h) {
-  feols(
-    as.formula(paste0(
-      dyn_vars[h+1], " ~ lev_shock + ", all_controls,
-      " | name + sec + dateq"
-    )),
-    data    = df_dyn,
-    cluster = ~ Country
-  )
-})
-res_IR_dd <- map(0:12, function(h) {
-  feols(
-    as.formula(paste0(
-      dyn_vars[h+1], " ~ d2d_shock + ", all_controls,
-      " | name + sec + dateq"
-    )),
-    data    = df_dyn,
-    cluster = ~ Country
-  )
-})
-
-# 7) Extraer coeficientes y errores estándar
-# --------------------------------------------------------
-IR_lev <- tibble(
-  horizon = 0:12,
-  beta_lev = map_dbl(res_IR_lev, ~ coef(.x)["lev_shock"]),
-  se_lev   = map_dbl(res_IR_lev, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
-)
-IR_dd <- tibble(
-  horizon = 0:12,
-  beta_dd  = map_dbl(res_IR_dd,  ~ coef(.x)["d2d_shock"]),
-  se_dd    = map_dbl(res_IR_dd,  ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
-)
-
-# 8) Presentar tabla con kableExtra
-# --------------------------------------------------------
-table_IR <- IR_lev %>%
-  left_join(IR_dd, by = "horizon") %>%
-  mutate(
-    Leverage          = sprintf("%.3f (%.3f)", beta_lev, se_lev),
-    `Dist-to-Default` = sprintf("%.3f (%.3f)", beta_dd,  se_dd)
-  ) %>%
-  select(Horizon = horizon, Leverage, `Dist-to-Default`)
-
-table_IR %>%
-  kable(caption = "Figure 6a: Respuestas dinámicas de pagos de interés (horizonte 0–12)",
-        align = c("c","c","c")) %>%
-  kable_styling(full_width = FALSE, bootstrap_options = c("striped","hover"))
-
-# 9) Graficar con ggplot2 y apilar con patchwork
-# --------------------------------------------------------
-p_lev <- ggplot(IR_lev, aes(x = horizon, y = beta_lev)) +
-  geom_line(size = 0.8, color = "firebrick") +
-  geom_point(size = 2, color = "firebrick") +
-  geom_ribbon(aes(ymin = beta_lev - 1.645*se_lev,
-                  ymax = beta_lev + 1.645*se_lev),
-              alpha = 0.2, fill = "firebrick") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(title = "Heterogeneidad por apalancamiento (FE: Country+dateq)", x = "Trimestres",
-       y = "Δ pagos de interés acumulados") +
-  theme_minimal()
-
-p_dd <- ggplot(IR_dd, aes(x = horizon, y = beta_dd)) +
-  geom_line(size = 0.8, color = "steelblue") +
-  geom_point(size = 2, color = "steelblue") +
-  geom_ribbon(aes(ymin = beta_dd - 1.645*se_dd,
-                  ymax = beta_dd + 1.645*se_dd),
-              alpha = 0.2, fill = "steelblue") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(title = "Heterogeneidad por distancia al default (FE: Country+dateq)", x = "Trimestres",
-       y = "Δ pagos de interés acumulados") +
-  theme_minimal()
-
-(p_lev / p_dd) +
-  plot_annotation(title = "Figure 18: Heterogeneidad financiera en la dinámica de pagos de interés (FE: Country+dateq)")
-
-
-
-
-# ======================================================================
-# Figura 10: Dinámica de Respuestas al Shock Monetario por Tamaño 
+# Figura 5: Dinámica de Respuestas al Shock Monetario por Tamaño 
 # ======================================================================
 
 # Partimos de df original
@@ -934,9 +762,9 @@ ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
   ), alpha = 0.2, fill = "orange") +
   scale_x_continuous(breaks = 0:12) +
   labs(
-    title = "Figura 10: Heterogeneidad de la inversion por tamaño de empresa (FE: Country+dateq)",
+    title = "Figura 5: Heterogeneidad de la inversion por tamaño de empresa",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión neta"
+    y     = "Efecto acumulado de inversión"
   ) +
   theme_minimal()
 
@@ -944,7 +772,7 @@ ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
 
 
 # ==============================================================
-# Figura 11: Dinámica Conjunta de Posición Financiera y Tamaño 
+# Figura 6: Dinámica Conjunta de Posición Financiera y Tamaño 
 # ==============================================================
 
 # Partimos de df original
@@ -1052,7 +880,7 @@ p13a <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_size)) +
   geom_ribbon(aes(ymin = beta_size - 1.645 * se_size,
                   ymax = beta_size + 1.645 * se_size),
               fill = "darkgreen", alpha = 0.2) +
-    labs(title = "Panel (a): Heterogeneidad por tamaño (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
+    labs(title = "Panel (a): Heterogeneidad por tamaño", x = "Trimestres", y = "Efecto acumulado de inversión") +
   theme_minimal()
 
 # 5b) Gráfico Leverage × Shock
@@ -1061,7 +889,7 @@ p13b <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_lev)) +
   geom_ribbon(aes(ymin = beta_lev - 1.645 * se_lev,
                   ymax = beta_lev + 1.645 * se_lev),
               fill = "firebrick", alpha = 0.2) +
-    labs(title = "Panel (b): Heterogeneidad por apalancamiento (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
+    labs(title = "Panel (b): Heterogeneidad por apalancamiento", x = "Trimestres", y = "Efecto acumulado de inversión") +
   theme_minimal()
 
 # 5c) Gráfico DD × Shock
@@ -1070,156 +898,12 @@ p13c <- ggplot(dd_size_coefs, aes(x = horizon, y = beta_dd)) +
   geom_ribbon(aes(ymin = beta_dd - 1.645 * se_dd,
                   ymax = beta_dd + 1.645 * se_dd),
               fill = "steelblue", alpha = 0.2) +
-    labs(title = "Panel (c): Heterogeneidad por distancia al default (FE: Country+dateq)", x = "Trimestres", y = "Efecto acumulado de inversión neta") +
+    labs(title = "Panel (c): Heterogeneidad por distancia al default", x = "Trimestres", y = "Efecto acumulado de inversión") +
   theme_minimal()
 
 # 6) Montaje final 3×1
 # ----------------------
 (p13a / p13b / p13c) +
   plot_annotation(
-    title = "Figura 13: Heterogeneidad conjunta de la posición Financiera y tamaño en la dinamica de la inversion neta (FE: Country+dateq)"
+    title = "Figura 6: Heterogeneidad conjunta de la posición Financiera y tamaño en la dinamica de la inversion"
   )
-
-
-
-# ----------------------------------------------------------------------------------------------------
-# Figura 21: Dinámica de Respuesta Diferencial a Choques Monetarios por Volatilidad de Ventas 5-Year
-# ----------------------------------------------------------------------------------------------------
-
-# Partimos de df original
-df_cntl21 <- df
-
-# 1) dlog_capital y Ldl_capital
-# ------------------------------
-if (!all(c("dlog_capital","Ldl_capital") %in% names(df_cntl21))) {
-  df_cntl21 <- df_cntl21 %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      capital2     = if_else(!is.na(capital) & capital>0, capital, NA_real_),
-      log_capital  = log(capital2),
-      dlog_capital = log_capital - lag(log_capital),
-      Ldl_capital  = lag(dlog_capital)
-    ) %>%
-    ungroup() %>%
-    select(-capital2, -log_capital)
-}
-
-
-# 2) Controles firm-level: ventas y liquidez
-# ------------------------------
-if (!"rsales_g_std" %in% names(df_cntl21)) {
-  df_cntl21 <- df_cntl21 %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      rsales_g     = log(saleq) - log(lag(saleq)),
-      rsales_g_std = (rsales_g - mean(rsales_g, na.rm = TRUE)) /
-        sd(rsales_g, na.rm = TRUE)
-    ) %>%
-    ungroup() %>%
-    select(-rsales_g)
-}
-
-if (!"liq_std" %in% names(df_cntl21)) {
-  df_cntl21 <- df_cntl21 %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      liq_std = (current_ratio - mean(current_ratio, na.rm = TRUE)) /
-        sd(current_ratio, na.rm = TRUE)
-    ) %>%
-    ungroup()
-}
-
-
-# 3) Volatilidad 5-Year + winsorización
-# -------------------------------------
-if (!"vol_5yr_std" %in% names(df_cntl21)) {
-  df_cntl21 <- df_cntl21 %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      yoy_sales    = log(saleq) - lag(log(saleq), 4),
-      vol_5yr      = zoo::rollapply(yoy_sales, 20, sd, na.rm = TRUE, fill = NA, align = "right"),
-      vol_5yr_std  = (vol_5yr - mean(vol_5yr, na.rm = TRUE)) / sd(vol_5yr, na.rm = TRUE),
-      vol5_win     = winsorize(vol_5yr_std)
-    ) %>%
-    ungroup() %>%
-    select(-yoy_sales, -vol_5yr)
-}
-
-
-# 4) Interacciones winsorizadas con shock y GDP
-# ----------------------------------------------
-df_cntl21 <- df_cntl21 %>%
-  mutate(
-    vol5_win_shock = vol5_win * shock,
-    vol5_win_gdp   = if ("dlog_gdp" %in% names(df_cntl21))
-      vol5_win * dlog_gdp else NA_real_
-  )
-
-# 5) Dinámicas acumuladas cumFh_dlog_capital h=0…12
-#----------------------------------------------------
-vars21 <- paste0("cumF", 0:12, "_dlog_capital")
-df_dyn21 <- if (!all(vars21 %in% names(df_cntl21))) {
-  df_cntl21 %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    group_modify(~{
-      tmp <- .x
-      for (h in 0:12) {
-        tmp[[vars21[h+1]]] <- rowSums(
-          map_dfc(0:h, ~ lead(tmp$dlog_capital, .x)),
-          na.rm = TRUE
-        )
-      }
-      tmp
-    }) %>%
-    ungroup()
-} else df_cntl21
-
-# 6) Definir controles firm-level y macro presentes
-# ---------------------------------------------------
-controls_firm21  <- c("rsales_g_std", "liq_std", "Ldl_capital")
-controls_macro21 <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn21))
-all_controls21   <- paste(c(controls_firm21, controls_macro21), collapse = " + ")
-
-# 7) Estimar dinámicas para h = 0…12
-# ------------------------------------
-has_vol_gdp <- "vol5_win_gdp" %in% names(df_dyn21)
-res21 <- map(0:12, function(h) {
-  rhs <- c(if (has_vol_gdp) "vol5_win_gdp", "vol5_win_shock", all_controls21)
-  feols(
-    as.formula(paste0(
-      vars21[h+1], " ~ ",
-      paste(rhs, collapse = " + "),
-      " | name + sec + dateq"
-    )),
-    data    = df_dyn21,
-    cluster = ~ Country
-  )
-})
-
-# 8) Extraer coeficientes y errores
-# -------------------------------------
-tbl21 <- tibble(
-  horizon        = 0:12,
-  beta_vol_shock = map_dbl(res21, ~ coef(.x)["vol5_win_shock"]),
-  se_vol_shock   = map_dbl(res21, ~ sqrt(vcov(.x)["vol5_win_shock","vol5_win_shock"]))
-)
-
-# 9) Graficar
-# --------------
-ggplot(tbl21, aes(x = horizon, y = beta_vol_shock)) +
-  geom_line(size = 1, color = "purple") +
-  geom_ribbon(aes(ymin = beta_vol_shock - 1.645*se_vol_shock,
-                  ymax = beta_vol_shock + 1.645*se_vol_shock),
-              alpha = 0.2, fill = "purple") +
-  scale_x_continuous(breaks = 0:12) +
-  labs(
-    title = "Figura 21: Heterogeneidad por volatilidad de los ultimos 5 años de la inversion neta (FE: Country+dateq)",
-    x     = "Horizonte (trimestres)",
-    y     = "Efecto acumulado de inversión"
-  ) +
-  theme_minimal()
