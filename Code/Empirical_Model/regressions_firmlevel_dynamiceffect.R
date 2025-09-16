@@ -336,19 +336,24 @@ p_dd_cyc <- ggplot(dyn_dd_cyc, aes(x = horizon, y = beta)) +
   theme_minimal()
 
 # 7) Montaje final en dos figuras (Figura 1a y Figura 1b)
-figure1a <- (p_lev_nocy | p_lev_cyc) +
+figure1a <- (p_lev_nocy / p_lev_cyc) +
   plot_annotation(
     title = "Figura 1a: Heterogeneidad por apalancamiento en la dinámica de la inversión ante un shock monetario expansivo"
   )
 
-figure1b <- (p_dd_nocy | p_dd_cyc) +
+figure1b <- (p_dd_nocy / p_dd_cyc) +
   plot_annotation(
     title = "Figura 1b: Heterogeneidad por distancia al default en la dinámica de la inversión ante un shock monetario expansivo"
   )
 
+figure1c <- (p_lev_nocy | p_dd_nocy) +
+  plot_annotation(
+    title = "Figura 1c: Heterogeneidad financiera en la dinámica de la inversión ante un shock monetario expansivo"
+  )
+
 print(figure1a)
 print(figure1b)
-
+print(figure1c)
 
 
 # =================================================================
