@@ -184,9 +184,8 @@ vTime = linspace(1,20,20)';
 subplot(1,2,2)
 hold on
 plot(vTime(2:end),vGrowthRates(2:end) + 0.1,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
-plot(vTime(2:end),.1*ones(size(vGrowthRates(2:end))),'linewidth',1.5,'linestyle','--','color','k')
 xlabel('Age in years','interpreter','latex')
-ylabel('Average growth rate','interpreter','latex')
+ylabel('Average growth rate, model','interpreter','latex')
 xlim([2 20])
 set(gcf,'color','w')
 grid on
