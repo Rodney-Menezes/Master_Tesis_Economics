@@ -1,0 +1,55 @@
+C:\dynare\4.6.4\matlab\Rodney\ottonello_winberry_model_codes\Steady state
+
+
+Steady_State Calibrations: 
+
+- Set_parameters_model.m
+
+rrhoProd_emp: Persistencia de la serie de productividad. Cálculo: coeficiente de la regresión AR(1) de log(saleq) por firma (0.927).
+ttheta: capital coefficient. Fuente: Promedio Larinoamericano (Documento). (0.33).
+nnu: labor coefficient. Fuente: Promedio Larinoamericano (Documento). (0.67).
+ddelta: capital depreciation rate. Fuente: Promedio Larinoamericano (Documento). (0.25).
+ppiExit: exogenous exit rate (quarterly); hit 10% annual exit rate. Fuente: Espanna (Documento). (10% anual).
+b0: Nivel base de endeudamiento inicial. Fuente:  Igual que el modelo inicial. (0)
+mmuEnt: Media de la distribución de productividad de las firmas entrantes. Fuente: calculo interno del modelo.
+ssigmaEnt: Desviación estándar de la productividad de entrantes.  Fuente: calculo interno del modelo.
+ggamma: elasticity of substitution. Fuente: Igual que el modelo y Chile. (10).
+pphiPrice, pphiInflation, pphiOutput: slope of NKPC, coefficient on inflation, coefficient on output in Taylor rule (90,1.25,0), para pphiInflation, pphiOutput, se uso el (Documento).
+pphiCapital: coefficient in capital adjustment cost Promedio Larinoamericano (Documento). (16)
+qSS: steady state price of capital,  Igual que el modelo y (Documento) (1).
+bbeta: discount factor (quarterly); Igual que modelo y documento (0.99).
+nSS: steady state employment rate. Igual que el modelo y el Mexico en el documento. (0.33)
+cchi: disuility of labor, igual que el Documento (1.72)
+ssigma: coefficient of relative risk aversion. Igual que el modelo y el documento. (1)
+'load parameters_calibration.mat'. Queda igual, los mismos parametros, porque son de datos que no tengo.
+
+------------------------------------------------------------------------
+
+- Set_parameters_numerical.m
+
+T_lifecycle: 20 años. (80 trimestres). Fuente: https://www.enterprisesurveys.org/content/dam/enterprisesurveys/documents/research/Mapping-Enterprises-LAC-Note.pdf
+(18 años, segun World Bank https://documents1.worldbank.org/curated/en/154071468242382906/pdf/El-emprendimiento-en-America-Latina-muchas-empresas-y-poca-innovacion.pdf?utm_source=chatgpt.com
+
+
+----------------------------------------------------
+- Calibration_targets_individual.m
+max_iterations_market_clearing  = 20; // Es igual que numero de iteracciones en  Set_parameters_numerical.m
+
+----------------------------------------------------------
+
+- Steady_State_value_function
+maxIterations          = 30 // Vambiar igual que el numero de iteraciones
+
+
+----------------------------------------------------------
+
+- STEADY_STATE
+
+max_iterations_market_clearing = 30 // Vambiar igual que el numero de iteraciones.
+Linea 118 (con datos).
+Linea 132 (con datos).
+Linea 144 (con datos).
+Linea 154 (con datos).
+Linea 450 (con datos).
+
+Esta parte de STEADY_STATE se calibra con 'Calibration STADY_STATE.R'
