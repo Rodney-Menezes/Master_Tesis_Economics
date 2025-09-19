@@ -56,6 +56,13 @@ prep_fin_vars <- function(df, p = 0.005) {
       lev_std      = safe_scale(leverage_win),
       dd_std       = safe_scale(dd_win)
     ) %>%
+    dplyr::ungroup() %>%
+    dplyr::group_by(name) %>%
+    dplyr::arrange(dateq, .by_group = TRUE) %>%
+    dplyr::mutate(
+      L1_lev_std = dplyr::lag(lev_std, 1),
+      L1_dd_std  = dplyr::lag(dd_std,  1)
+    ) %>%
     dplyr::ungroup()
 }
 
@@ -204,11 +211,11 @@ df <- df %>%
   add_lagged_controls(c("rsales_g_std", "size_raw", "sh_current_a_std"))
 
 # 2) Crear interacciones “raw” (winsorizadas) con el shock
-df <- df %>%
-mutate(
-  lev_shock = lev_std * shock_std,
-  d2d_shock = dd_std  * shock_std
-)
+df <- df %>%␊
+mutate(␊
+  lev_shock = L1_lev_std * shock_std,
+  d2d_shock = L1_dd_std  * shock_std
+)␊
 
 # 3) Construir cumFh_dlog_capital para h = 0…12
 # --------------------------------------------------------
@@ -522,19 +529,19 @@ df <- prep_fin_vars(df)
 
 # 3) Interacciones con shock y con dlog_gdp (si existe)
 # ------------------------------------------------------
-if ("dlog_gdp" %in% names(df)) {
-  df <- df %>%
-    mutate(
-      lev_shock_gdp = lev_std * dlog_gdp,
-      d2d_shock_gdp = dd_std * dlog_gdp
-    )
-}
-
-df <- df %>%
-  mutate(
-    lev_shock = lev_std * shock_std,
-    d2d_shock = dd_std  * shock_std
-  )
+if ("dlog_gdp" %in% names(df)) {␊
+  df <- df %>%␊
+    mutate(␊
+      lev_shock_gdp = L1_lev_std * dlog_gdp,
+      d2d_shock_gdp = L1_dd_std  * dlog_gdp
+    )␊
+}␊
+␊
+df <- df %>%␊
+  mutate(␊
+    lev_shock = L1_lev_std * shock_std,
+    d2d_shock = L1_dd_std  * shock_std
+  )␊
 
 # 4) Construir cumFh_dlog_capital para h = 0…12
 # --------------------------------------
@@ -863,15 +870,15 @@ df_cntl13 <- df_cntl13 %>%
 
 # 2) rear interacciones con shock y dlog_gdp
 # -------------------------------------------
-df_cntl13 <- df_cntl13 %>%
-  mutate(
-    size_shock    = size_win * shock_std,
-    size_gdp      = size_win * dlog_gdp,
-    lev_shock     = lev_std * shock_std,
-    lev_shock_gdp = lev_std * dlog_gdp,
-    d2d_shock     = dd_std  * shock_std,
-    d2d_shock_gdp = dd_std  * dlog_gdp
-  )
+df_cntl13 <- df_cntl13 %>%␊
+  mutate(␊
+    size_shock    = size_win * shock_std,␊
+    size_gdp      = size_win * dlog_gdp,␊
+    lev_shock     = L1_lev_std * shock_std,
+    lev_shock_gdp = L1_lev_std * dlog_gdp,
+    d2d_shock     = L1_dd_std  * shock_std,
+    d2d_shock_gdp = L1_dd_std  * dlog_gdp
+  )␊
 
 # 3) Construir dlog_capital y dinámicas cumFh_dlog_capital
 # ---------------------------------------------------------
