@@ -313,127 +313,6 @@ print('../Results/agg_transmission_mechanism.eps','-depsc')
 
 
 %%%
-% Investment IRFs by heterogeneity channels
-%%%
-
-% Use firms with at least seven years of pre-shock history (28 quarters)
-% to classify heterogeneity groups and compute the impulse responses.
-tPre                              = 7 * 4;
-transition_path_panel;
-eval(sprintf('mTransitionPanel_%d = mTransitionPanel;',tPre));
-
-T_panel = size(mCapitalPanel,2);
-N_panel = size(mCapitalPanel,1);
-
-mStatePanelBaseline = zeros(N_panel,3);
-mStatePanelBaseline(:,1) = mmuEnt + ssigmaEnt * vInitialProductivity;
-mStatePanelBaseline(:,2) = k0;
-mStatePanelBaseline(:,3) = b0;
-
-mCapitalPanelBaseline = zeros(N_panel,T_panel);
-mInSampleBaseline = ones(N_panel,T_panel);
-mExitPanelBaseline = zeros(N_panel,T_panel);
-mDefaultPanelBaseline = zeros(N_panel,T_panel);
-
-for tBaseline = 1:T_panel
-    vProfitsBaseline =  A * (exp(mStatePanelBaseline(:,1)) .^ (1 / (1 - nnu))) .* ...
-        ((exp(mCapitalQuality(:,tBaseline)) .* mStatePanelBaseline(:,2)) .^ tthetaHat) .* ...
-        (wage ^ (-nnu / (1 - nnu)));
-    vCashBaseline = vProfitsBaseline + qSS * (1 - ddelta) * exp(mCapitalQuality(:,tBaseline)) .* ...
-        mStatePanelBaseline(:,2) - mStatePanelBaseline(:,3) - ppsi_0;
-
-    vProdBaseline = min(max(prodMin * ones(N_panel,1), mStatePanelBaseline(:,1)), prodMax * ones(N_panel,1));
-    vCashBaseline = min(max(cashMin * ones(N_panel,1), vCashBaseline), cashMax * ones(N_panel,1));
-
-    vDefaultCutoffBaseline = interpn(vProdGrid, vDefaultCutoffSS, vProdBaseline);
-    vCapitalPrimeBaseline = interpn(mProdGrid, mCashGrid, mCapitalPrimeSS, vProdBaseline, vCashBaseline);
-    vDebtPrimeBaseline = interpn(mProdGrid, mCashGrid, mDebtPrimeSS, vProdBaseline, vCashBaseline);
-
-    mExitPanelBaseline(:,tBaseline) = (mExitShocks(:,tBaseline) <= ppiExit);
-    mDefaultPanelBaseline(:,tBaseline) = mExitPanelBaseline(:,tBaseline) .* (vCashBaseline <= 0) + ...
-        (1 - mExitPanelBaseline(:,tBaseline)) .* (vCashBaseline <= vDefaultCutoffBaseline);
-
-    mCapitalPanelBaseline(:,tBaseline) = mStatePanelBaseline(:,2);
-
-    mStatePanelBaseline(:,1) = rrhoProd * mStatePanelBaseline(:,1) + ssigmaProd * mProductivityShocks(:,tBaseline);
-    mStatePanelBaseline(:,2) = vCapitalPrimeBaseline;
-    mStatePanelBaseline(:,3) = vDebtPrimeBaseline / inflationSS;
-end
-
-for tBaseline = 1:T_panel
-    if tBaseline < T_panel
-        exitMaskBaseline = (mExitPanelBaseline(:,tBaseline) == 1);
-        if any(exitMaskBaseline)
-            mInSampleBaseline(exitMaskBaseline, tBaseline+1:end) = 0;
-        end
-    end
-    defaultMaskBaseline = (mDefaultPanelBaseline(:,tBaseline) == 1);
-    if any(defaultMaskBaseline)
-        mInSampleBaseline(defaultMaskBaseline, tBaseline:end) = 0;
-    end
-end
-
-irfHetResults = impulse_response_heterogeneity(mCapitalPanel,mCapitalPanelBaseline, ...
-                                            mDebtPanel,mCashPanel,mDefaultCutoffPanel, ...
-											mInSample,mInSampleBaseline,tPre);
-set(irfHetResults.figure,'PaperUnits','inches','PaperPosition',[0 0 10 4]);
-print(irfHetResults.figure,'../Results/investment_irf_heterogeneity.eps','-depsc');
-
-tPreHeterogeneity                 = tPre;
-
-%%%
-% Investment IRFs with continuous heterogeneity (demeaned within firm)
-%%%
-
-irfContinuousResults = impulse_response_continuous_heterogeneity(mCapitalPanel,mCapitalPanelBaseline, ...
-                                                            mDebtPanel,mCashPanel,mDefaultCutoffPanel, ...
-                                                            mInSample,mInSampleBaseline,tPre);
-set(irfContinuousResults.figure,'PaperUnits','inches','PaperPosition',[0 0 10 4]);
-print(irfContinuousResults.figure,'../Results/investment_irf_continuous_heterogeneity.eps','-depsc');
-
-
-
-%%%
-% Nuevas gráficas: Spread vs variables clave
-%%%
-
-vTime = (1:T)';
-
-% 1) Trayectorias comparadas: Spread, tasa nominal y real
-figure; hold on
-plot(vTime, 400*(vAggregateR_nom(1:T)-1/bbeta), '--','LineWidth',1.5)
-plot(vTime, vAggregateCreditSpread(1:T), '-.','LineWidth',1.5)
-plot(vTime, 400*(vAggregateR_real(1:T)-1/bbeta), ':','LineWidth',1.5)
-legend('Nominal – SS','Spread soberano','Real – SS','Location','Best')
-xlabel('Trimestres'); ylabel('Desviaciones'); title('Tasas y Spread')
-grid on
-print('../Results/rates_and_spread.eps','-depsc')
-
-% 2) Respuesta conjunta de producción e inversión vs. spread
-%figure
-%%%
-figure
-yyaxis left
-  % Usamos sólo 1:T para que coincida con vTime
-  plot(vTime, 100 * log(vAggregateOutput(1:T)   / aggregateOutputSS), ...
-       '-', 'LineWidth',1.5)
-  hold on
-  plot(vTime, 100 * log(vAggregateInvestment(1:T) / aggregateInvestmentSS), ...
-       '--', 'LineWidth',1.5)
-  ylabel('% desvío output / inversión')
-yyaxis right
-  plot(vTime, vAggregateCreditSpread(1:T), '-.', 'LineWidth',1.5)
-  ylabel('Spread soberano')
-xlabel('Trimestres')
-title('Output e Inversión vs. Spread','Interpreter','latex')
-grid on
-legend('Output','Inversión','Spread','Location','NorthEast')
-print('../Results/output_investment_vs_spread.eps','-depsc')
-
-
-
-
-%%%
 % Comparison to representative agent model
 %%%
 
@@ -483,13 +362,9 @@ print('../Results/rep_firm_comparison.eps','-depsc')
 
 vCutoffRange		= [7;9;11;13;15;17;19;21;23;25;27;29];
 for iCutoff = 1:12
-	tPre 	= vCutoffRange(iCutoff) * 4; % select firms who have survived at least tPre years
-		% The heterogeneity IRFs above already simulated this cutoff; reuse stored results.
-        if exist('tPreHeterogeneity','var') && (tPre == tPreHeterogeneity)
-                continue;
-        end
-	transition_path_panel;				 % simulate the transition path
-	eval(sprintf('mTransitionPanel_%d = mTransitionPanel;',tPre));
+	tPre    = vCutoffRange(iCutoff) * 4; % select firms who have survived at least tPre years
+        transition_path_panel;                           % simulate the transition path
+        eval(sprintf('mTransitionPanel_%d = mTransitionPanel;',tPre));
 end
 % Uncomment to produce new panel simulations with new draws of shocks
 %
