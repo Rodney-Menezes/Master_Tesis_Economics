@@ -3,13 +3,13 @@ function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapital
 %   irfResults = IMPULSE_RESPONSE_HETEROGENEITY(mCapitalPanelShock, mCapitalPanelBase,
 %   mDebtPanel, mCashPanel, mDefaultCutoffPanel, mInSampleShock, mInSampleBase, tPre)
 %   computes impulse-response functions for the log capital stock (expressed
-%   in percentage-point deviations relative to a no-shock baseline) along two
-%   heterogeneity channels (leverage and distance-to-default). The baseline
-%   corresponds to the same economy and initial distribution simulated with
-%   the monetary shock turned off. The function reports the response for a
-%   horizon of up to 12 quarters (or as many quarters as are available) and
-%   returns both the series for each heterogeneity group and a handle to the
-%   generated figure.
+%   in percentage-point deviations relative to the shocked-economy baseline)
+%   along two heterogeneity channels (leverage and distance-to-default). The
+%   baseline corresponds to the pre-shock period in the economy hit by the
+%   monetary shock, so no counterfactual path is subtracted. The function
+%   reports the response for a horizon of up to 12 quarters (or as many
+%   quarters as are available) and returns both the series for each
+%   heterogeneity group and a handle to the generated figure.
 %%
 %   Additional name-value pair arguments:
 %       'Horizon'      - Number of post-shock quarters to report (default 12).
@@ -69,21 +69,16 @@ function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapital
 
     timeIndices = tPre + (0:horizon);
     logCapitalShock = log(max(mCapitalPanelShock(:, timeIndices), epsilon));
-    logCapitalBase = log(max(mCapitalPanelBase(:, timeIndices), epsilon));
 
     inSampleShockWindow = (mInSampleShock(:, timeIndices) == 1);
     inSampleBaseWindow = (mInSampleBase(:, timeIndices) == 1);
     validWindow = inSampleShockWindow & inSampleBaseWindow;
 
     logCapitalShock(~validWindow) = NaN;
-    logCapitalBase(~validWindow) = NaN;
 
     baselineShock = logCapitalShock(:,1);
-    baselineBase = logCapitalBase(:,1);
 
-    deltaShock = logCapitalShock - baselineShock;
-    deltaBase = logCapitalBase - baselineBase;
-    diffLogCapital = deltaShock - deltaBase;
+    diffLogCapital = logCapitalShock - baselineShock;
 
     quarters = (0:horizon)';
     irfLeverageLow = NaN(numel(quarters),1);
@@ -160,7 +155,7 @@ function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapital
     grid on;
     xlabel('Trimestres');
     ylabel({'Variación log capital', ...
-        '(p.p. vs. base sin shock)'});
+         '(p.p. vs. línea base)'});
     title('Canal de apalancamiento');
     legend({'Bajo apalancamiento','Alto apalancamiento'},'Location','best');
     hold off;
@@ -173,7 +168,7 @@ function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapital
     grid on;
     xlabel('Trimestres');
     ylabel({'Variación log capital', ...
-        '(p.p. vs. base sin shock)'});
+        '(p.p. vs. línea base)'});
     title('Canal distancia al default');
     legend({'Cerca del default','Lejos del default'},'Location','best');
     hold off;
