@@ -2,9 +2,10 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
 %IMPULSE_RESPONSE_HETEROGENEITY Compute IRFs for leverage and default-distance heterogeneity.
 %   irfResults = IMPULSE_RESPONSE_HETEROGENEITY(mInvestmentPanel, mCapitalPanel,
 %   mDebtPanel, mCashPanel, mDefaultCutoffPanel, mInSample, tPre) computes
-%   the cumulative impulse responses of investment rates along two
-%   heterogeneity channels (leverage and distance-to-default) over a default
-%   horizon of 12 quarters using the simulated panel outputs from
+%   the cumulative impulse responses of investment rates (investment-to-
+%   capital) as accumulated percentage-point deviations from the steady
+%   state along two heterogeneity channels (leverage and distance-to-default)
+%   over a default horizon of 12 quarters using the simulated panel outputs from
 %   TRANSITION_PATH_PANEL.
 %
 %   Additional name-value pair arguments:
@@ -140,7 +141,8 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel('p.p. acumulados respecto al estado estacionario');
+    ylabel({'Variación acumulada de la tasa de inversión', ...
+        '(p.p. inv./capital vs. estado estacionario)'});
     title('Canal de apalancamiento');
     legend({'Bajo apalancamiento','Alto apalancamiento'},'Location','best');
     hold off;
@@ -152,7 +154,8 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel('p.p. acumulados respecto al estado estacionario');
+    ylabel({'Variación acumulada de la tasa de inversión', ...
+        '(p.p. inv./capital vs. estado estacionario)'});
     title('Canal distancia al default');
     legend({'Cerca del default','Lejos del default'},'Location','best');
     hold off;
