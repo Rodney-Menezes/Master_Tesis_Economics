@@ -64,8 +64,9 @@ prep_shock_var <- function(df, p = 0.005) {
   df %>%
     dplyr::group_by(Country) %>%
     dplyr::mutate(
-      shock_win = winsorize(shock, p = p),
-      shock_exp = -shock_win
+      shock_win   = winsorize(shock, p = p),
+      shock_exp_z = -(shock_win - mean(shock_win, na.rm = TRUE)) /
+        stats::sd(shock_win, na.rm = TRUE)
     ) %>%
     dplyr::ungroup()
 }
@@ -200,8 +201,8 @@ df <- df %>%
 # 2) Crear interacciones winsorizadas con el shock expansivo
 df <- df %>%
   dplyr::mutate(
-    lev_shock = L1_lev_dm * shock_exp,
-    d2d_shock = L1_dd_dm  * shock_exp
+    lev_shock = L1_lev_dm * shock_exp_z,
+    d2d_shock = L1_dd_dm  * shock_exp_z
   )
 
 # 3) Construir cumFh_dlog_capital para h = 0…12
@@ -338,18 +339,18 @@ res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
-    " ~ shock_exp + lev_shock + d2d_shock + ", all_controls,
+    " ~ shock_exp_z + lev_shock + d2d_shock + ", all_controls,
     " | name + sec + dateq"
   ))
   feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
 })
 
-# 6) Extraer coeficientes y errores estándar para 'shock_exp'
+# 6) Extraer coeficientes y errores estándar para 'shock_exp_z'
 # -------------------------------------------------------
 avg_coefs <- tibble::tibble(
   horizon    = 0:12,
-  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp"]),
-  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp","shock_exp"]))
+  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp_z"]),
+  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp_z","shock_exp_z"]))
 )
 
 # 7) Graficar la respuesta promedio al shock
@@ -406,8 +407,8 @@ if ("dlog_gdp" %in% names(df)) {
 
 df <- df %>%
   mutate(
-    lev_shock = L1_lev_dm * shock_exp,
-    d2d_shock = L1_dd_dm  * shock_exp
+    lev_shock = L1_lev_dm * shock_exp_z,
+    d2d_shock = L1_dd_dm  * shock_exp_z
   )
 
 # 4) Construir cumFh_dlog_capital para h = 0…12
@@ -565,18 +566,18 @@ res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
-    " ~ shock_exp + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
+    " ~ shock_exp_z + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
     " | name + sec + dateq"
   ))
   feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
 })
 
-# 7) Extraer coeficientes y errores estándar para 'shock_exp'
+# 7) Extraer coeficientes y errores estándar para 'shock_exp_z'
 # -------------------------------------------------------
 avg_coefs <- tibble::tibble(
   horizon    = 0:12,
-  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp"]),
-  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp","shock_exp"]))
+  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp_z"]),
+  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp_z","shock_exp_z"]))
 )
 
 # 8) Graficar la respuesta promedio al shock
@@ -635,13 +636,13 @@ if ("dlog_gdp" %in% names(df_cntl)) {
   warning("No existe 'dlog_gdp'; se omite creación de 'size_gdp'.")
 }
 
-if ("shock_exp" %in% names(df_cntl)) {
+if ("shock_exp_z" %in% names(df_cntl)) {
   df_cntl <- df_cntl %>%
     mutate(
-      size_shock = if (!"size_shock" %in% names(.)) size_win * shock_exp else size_shock
+      size_shock = if (!"size_shock" %in% names(.)) size_win * shock_exp_z else size_shock
     )
 } else {
-  stop("Falta la variable 'shock_exp' en el data frame.")
+  stop("Falta la variable 'shock_exp_z' en el data frame.")
 }
 
 # 3) Construir dinámicas acumuladas cumFh_dlog_capital para h = 0…12
@@ -741,11 +742,11 @@ df_cntl13 <- df_cntl13 %>%
 # -------------------------------------------
 df_cntl13 <- df_cntl13 %>%
   mutate(
-    size_shock    = size_win * shock_exp,
+    size_shock    = size_win * shock_exp_z,
     size_gdp      = size_win * dlog_gdp,
-    lev_shock     = L1_lev_dm * shock_exp,
+    lev_shock     = L1_lev_dm * shock_exp_z,
     lev_shock_gdp = L1_lev_dm * dlog_gdp,
-    d2d_shock     = L1_dd_dm  * shock_exp,
+    d2d_shock     = L1_dd_dm  * shock_exp_z,
     d2d_shock_gdp = L1_dd_dm  * dlog_gdp
   )
 
