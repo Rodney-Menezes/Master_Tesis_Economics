@@ -5,26 +5,25 @@
 global ttheta nnu ddelta rrhoProd ssigmaProd aalpha ppsi_0 ppiExit kInitial b0 ...
   pphiPrice ggamma pphiInflation pphiOutput pphiCapital qSS bbeta nSS cchi ssigmaM rrhoM ...
   mmuEnt ssigmaEnt ssigma pSS kRepSS yRepSS k0 A tthetaHat cRepSS muRepSS wRepSS inflationSS ...
-  cchi ssigmaOmega pphiPrice pphiS ssigmaS rrhoS
+  cchi ssigmaOmega pphiPrice pphiS ssigmaS rrhoS lambda0 alpha ssigmaM rho
 
 %%%
 % Load in calibrated parameters
 %%%
 
-load parameters_calibration.mat
-ssigmaProd      = vParms(1);
-ppsi_0          = vParms(2);
-kInitial        = vParms(3);
-mmuEnt          = vParms(4);
-aalpha          = vParms(5);
-ssigmaOmega     = vParms(6);
-
+    load parameters_calibration.mat 
+    ssigmaProd      = vParms(1);
+    ppsi_0          = vParms(2);
+    kInitial        = vParms(3);
+    mmuEnt          = vParms(4);
+    aalpha          = vParms(5);
+    ssigmaOmega     = vParms(6);
+    
 
 % Parametros exogenos del riesgo pais:
 pphiS = 0.4;
 ssigmaS = 0.02;
 rrhoS   = 0.8;
-aggregateCreditSpreadSS = 0.05;   % nivel de estado estacionario
 
 % Exogenously fix persistence of productivity shocks
 rrhoProd    = 0.927;
@@ -69,10 +68,13 @@ pphiS           = 0.10;    % valor inicial (ajustar según calibración)
 rrhoS           = 0.8;     % persistencia aproximada
 ssigmaS         = 0.02;    % desviación estándar
 
+lambda0         = 5;        % coeficiente base de apalancamiento  
+alpha           = 2;        % sensibilidad del apalancamiento al riesgo s_t  
+
+
 % Aggregate shocks
 ssigmaM 	    = .0025;							% SD of monetary policy shock
 rrhoM			= .5;							    % persistence of monetary policy shock
-
 
 %%%
 % Parameters that depend on representative agent steady state
