@@ -141,6 +141,33 @@ df <- df %>%
 df <- df %>%
   prep_fin_vars(p = 0.005)
 
+# Niveles base por firma y país y dummies ex-ante (apalancamiento/distancia al default)
+firm_fin_base <- df %>%
+  dplyr::group_by(Country, name) %>%
+  dplyr::summarise(
+    lev_base = mean(leverage_win, na.rm = TRUE),
+    dd_base  = mean(dd_win,       na.rm = TRUE),
+    .groups  = "drop"
+  ) %>%
+  dplyr::group_by(Country) %>%
+  dplyr::mutate(
+    lev_p25 = stats::quantile(lev_base, 0.25, na.rm = TRUE),
+    lev_p75 = stats::quantile(lev_base, 0.75, na.rm = TRUE),
+    dd_p25  = stats::quantile(dd_base,  0.25, na.rm = TRUE),
+    dd_p75  = stats::quantile(dd_base,  0.75, na.rm = TRUE)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    low_lev  = dplyr::if_else(lev_base <= lev_p25, 1L, 0L, missing = NA_integer_),
+    high_lev = dplyr::if_else(lev_base >= lev_p75, 1L, 0L, missing = NA_integer_),
+    near_def = dplyr::if_else(dd_base  <= dd_p25,  1L, 0L, missing = NA_integer_),
+    far_def  = dplyr::if_else(dd_base  >= dd_p75,  1L, 0L, missing = NA_integer_)
+  ) %>%
+  dplyr::select(-lev_p25, -lev_p75, -dd_p25, -dd_p75)
+
+df <- df %>%
+  dplyr::left_join(firm_fin_base, by = c("Country", "name"))
+
 # =================================================================
 # Figure 1: Respuesta dinámica de la inversión al shock monetario
 # =================================================================
@@ -206,7 +233,8 @@ if (!all(vars_cap %in% names(df))) {
 # 4) Definir controles y cadena de regresores
 controls_firm   <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
 controls_macro  <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn_nocy))
-all_controls_nocy <- paste(c(controls_firm, controls_macro), collapse = " + ")
+controls_vec_nocy <- c(controls_firm, controls_macro)
+all_controls_nocy <- paste(controls_vec_nocy, collapse = " + ")
 
 # 5) Estimar dinámicas h = 0…12 sin componente cíclico
 res_lev_nocy <- map(0:12, function(h) {
@@ -277,6 +305,126 @@ figure1 <- (p_lev_nocy | p_dd_nocy) +
   )
 
 print(figure1)
+
+# ============================================================
+# Submuestras ex-ante: canales de apalancamiento y default
+# ============================================================
+
+estimate_lp_subset <- function(data_in) {
+  purrr::map(0:12, function(h) {
+    dep_var   <- paste0("cumF", h, "_dlog_capital")
+    rhs_terms <- c("shock_std", controls_vec_nocy)
+    rhs_terms <- rhs_terms[nzchar(rhs_terms)]
+    rhs_str   <- paste(rhs_terms, collapse = " + ")
+    fml_str   <- paste(dep_var, "~", rhs_str, "| name + sec + dateq")
+
+    feols(
+      stats::as.formula(fml_str),
+      data    = data_in,
+      cluster = ~ Country
+    )
+  })
+}
+
+extract_shock_path <- function(models) {
+  tibble(
+    horizon = 0:12,
+    beta = purrr::map_dbl(models, function(m) {
+      coefs <- coef(m)
+      if ("shock_std" %in% names(coefs)) {
+        coefs[["shock_std"]]
+      } else {
+        NA_real_
+      }
+    }),
+    se = purrr::map_dbl(models, function(m) {
+      vc <- vcov(m)
+      if (!is.null(dim(vc)) &&
+          "shock_std" %in% rownames(vc) &&
+          "shock_std" %in% colnames(vc)) {
+        sqrt(vc["shock_std", "shock_std"])
+      } else {
+        NA_real_
+      }
+    })
+  )
+}
+
+df_low_lev  <- df_dyn_nocy %>% dplyr::filter(!is.na(low_lev),  low_lev == 1L)
+df_high_lev <- df_dyn_nocy %>% dplyr::filter(!is.na(high_lev), high_lev == 1L)
+df_near_def <- df_dyn_nocy %>% dplyr::filter(!is.na(near_def), near_def == 1L)
+df_far_def  <- df_dyn_nocy %>% dplyr::filter(!is.na(far_def),  far_def == 1L)
+
+res_low_lev  <- estimate_lp_subset(df_low_lev)
+res_high_lev <- estimate_lp_subset(df_high_lev)
+res_near_def <- estimate_lp_subset(df_near_def)
+res_far_def  <- estimate_lp_subset(df_far_def)
+
+dyn_low_lev <- extract_shock_path(res_low_lev) %>%
+  dplyr::mutate(grupo = "P25: Bajo apalancamiento")
+dyn_high_lev <- extract_shock_path(res_high_lev) %>%
+  dplyr::mutate(grupo = "P75: Alto apalancamiento")
+dyn_near_def <- extract_shock_path(res_near_def) %>%
+  dplyr::mutate(grupo = "P25: Cercanas al default")
+dyn_far_def <- extract_shock_path(res_far_def) %>%
+  dplyr::mutate(grupo = "P75: Lejos del default")
+
+lev_palette <- c(
+  "P25: Bajo apalancamiento" = "#1f78b4",
+  "P75: Alto apalancamiento" = "#e31a1c"
+)
+def_palette <- c(
+  "P25: Cercanas al default" = "#33a02c",
+  "P75: Lejos del default"   = "#6a3d9a"
+)
+
+dyn_lev_channel <- dplyr::bind_rows(dyn_low_lev, dyn_high_lev) %>%
+  dplyr::mutate(grupo = factor(grupo, levels = names(lev_palette)))
+dyn_def_channel <- dplyr::bind_rows(dyn_near_def, dyn_far_def) %>%
+  dplyr::mutate(grupo = factor(grupo, levels = names(def_palette)))
+
+p_leverage_channel <- ggplot(dyn_lev_channel,
+                              aes(x = horizon, y = beta, color = grupo, fill = grupo)) +
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
+              alpha = 0.15,
+              color = NA) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = lev_palette) +
+  scale_fill_manual(values = lev_palette) +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
+    title = "Canal de apalancamiento",
+    x     = "Trimestres",
+    y     = "Efecto acumulado de inversión",
+    color = "Submuestra",
+    fill  = "Submuestra"
+  ) +
+  theme_minimal()
+
+p_default_channel <- ggplot(dyn_def_channel,
+                             aes(x = horizon, y = beta, color = grupo, fill = grupo)) +
+  geom_ribbon(aes(ymin = beta - 1.645 * se,
+                  ymax = beta + 1.645 * se),
+              alpha = 0.15,
+              color = NA) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = def_palette) +
+  scale_fill_manual(values = def_palette) +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
+    title = "Canal distancia al default",
+    x     = "Trimestres",
+    y     = "Efecto acumulado de inversión",
+    color = "Submuestra",
+    fill  = "Submuestra"
+  ) +
+  theme_minimal()
+
+print(p_leverage_channel)
+print(p_default_channel)
 
 
 # =================================================================
