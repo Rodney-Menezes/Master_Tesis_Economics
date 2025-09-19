@@ -67,7 +67,7 @@ foreach tPre in 28 36 44 52 60 68 76 84 92 100 108 116 {
 
 	* Generate monetary shock
 	gen epsilon_m = 0
-	forvalues t = 1 / 10 {
+		forvalues t = 1 / 12 {
 		replace epsilon_m = -0.0025 * (.5^(`t' - 1)) if quarter_id == `tPre' + `t'
 	}
 
