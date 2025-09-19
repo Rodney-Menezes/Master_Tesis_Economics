@@ -4,7 +4,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
 %   mCapitalPanel,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSample,tPre)
 %   calculates the cumulative impulse-response functions of investment
 %   rates (investment-to-capital) expressed as accumulated percentage-point
-%   deviations from the steady state when heterogeneity is summarized by
+%   deviations from a post-shock baseline ("línea base") when heterogeneity
+%   is summarized by
 %   continuous (demeaned) leverage and distance-to-default measures rather
 %   than discrete quantile groups.
 %
@@ -58,7 +59,6 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     end
 
     classificationIdx = min(tPre + 1, totalPeriods);
-    baselineIdx = tPre;
 
     denom = max(mCapitalPanel, 1e-8);
     investmentRate = mInvestmentPanel ./ denom;
@@ -80,14 +80,13 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     xLeverage = leverageDemeaned(:,classificationIdx);
     xDistance = distanceDemeaned(:,classificationIdx);
 
-    baselineMask = (mInSample(:,baselineIdx) == 1);
-    baselineMean = mean(investmentRate(baselineMask, baselineIdx), 'omitnan');
-    if isnan(baselineMean)
-        error('Unable to compute the aggregate baseline investment rate.');
+    postShockIdx = tPre + (1:horizon);
+    baselinePath = mean(investmentRate(:, postShockIdx), 1, 'omitnan');
+    if any(isnan(baselinePath))
+        error('Unable to compute the aggregate baseline investment path after the shock.');
     end
 
-    postShockIdx = tPre + (1:horizon);
-    investmentDeviation = investmentRate(:, postShockIdx) - baselineMean;
+    investmentDeviation = bsxfun(@minus, investmentRate(:, postShockIdx), baselinePath);
     cumulativeDeviation = cumsum(investmentDeviation, 2);
 
     quarters = (1:horizon)';
@@ -147,8 +146,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada de la tasa de inversión', ...
-        '(p.p. inv./capital vs. estado estacionario, por 1 unidad)'});
+    ylabel({'Variación acumulada inv./capital', ...
+        '(p.p. vs. línea base, por 1 unidad)'});
     title('Apalancamiento (centrado por firma)');
     hold off;
 
@@ -158,8 +157,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada de la tasa de inversión', ...
-        '(p.p. inv./capital vs. estado estacionario, por 1 unidad)'});
+    ylabel({'Variación acumulada inv./capital', ...
+        '(p.p. vs. línea base, por 1 unidad)'});
     title('Distancia al default (centrada por firma)');
     hold off;
 
@@ -169,6 +168,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     irfResults.leverage.effectPerUnit = effectLeveragePerUnit;
     irfResults.distance.slope = slopeDistance;
     irfResults.distance.effectPerUnit = effectDistancePerUnit;
+    irfResults.baselinePath = baselinePath(:);
     irfResults.figure = fig;
 
 end
