@@ -89,6 +89,26 @@ prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
     dplyr::ungroup()
 }
 
+# Crea rezagos (por defecto, un periodo) de los controles firm-level dentro de firma
+add_lagged_controls <- function(df, vars, lag = 1) {
+  vars_present <- intersect(vars, names(df))
+  if (length(vars_present) == 0) {
+    return(df)
+  }
+
+  lag_prefix <- paste0("L", lag, "_")
+
+  df %>%
+    dplyr::group_by(name) %>%
+    dplyr::arrange(dateq, .by_group = TRUE) %>%
+    dplyr::mutate(dplyr::across(
+      dplyr::all_of(vars_present),
+      ~ dplyr::lag(.x, lag),
+      .names = paste0(lag_prefix, "{.col}")
+    )) %>%
+    dplyr::ungroup()
+}
+
 
 # ===========================================
 # Carga de datos y preprocesamiento consistente
@@ -153,6 +173,9 @@ if (!"size_raw" %in% names(df)) {
 df <- df %>%
   prep_ctrl_var(var_in = "current_ratio", prefix = "sh_current_a", p = 0.005)
 
+df <- df %>%
+  add_lagged_controls(c("rsales_g_std", "size_raw", "sh_current_a_std"))
+
 # 2) Crear interacciones “raw” (winsorizadas) con el shock
 df <- df %>%
 mutate(
@@ -181,7 +204,7 @@ if (!all(vars_cap %in% names(df))) {
 }
 
 # 4) Definir controles y cadena de regresores
-controls_firm   <- c("rsales_g_std", "size_raw", "sh_current_a_std")
+controls_firm   <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
 controls_macro  <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn_nocy))
 all_controls_nocy <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
@@ -283,7 +306,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 
 # 4) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
-controls_firm  <- c("rsales_g_std", "size_raw", "sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
 controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
@@ -387,7 +410,7 @@ df_dyn11 <- if (!all(vars_cap11 %in% names(df))) {
 
 # 5) Definir controles firm-level y macro
 # --------------------------------------
-controls_firm  <- c("rsales_g_std", "size_raw", "sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
 controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn11))
 base_controls  <- c(controls_firm, controls_macro)
 
@@ -510,7 +533,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 
 # 5) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
-controls_firm  <- c("rsales_g_std", "size_raw", "sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
 controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
@@ -570,6 +593,7 @@ df_cntl <- df_cntl %>%
   dplyr::ungroup() %>%
   prep_ctrl_var(var_in = "rsales_g", prefix = "rsales_g", p = 0.005) %>%
   prep_ctrl_var(var_in = "current_ratio", prefix = "sh_current_a", p = 0.005) %>%
+  add_lagged_controls(c("rsales_g_std", "size_raw", "sh_current_a_std")) %>%
   dplyr::group_by(name) %>%
   dplyr::arrange(dateq, .by_group = TRUE) %>%
   dplyr::mutate(
@@ -622,7 +646,7 @@ df_dyn12 <- if (!all(vars_cum %in% names(df_cntl))) {
 
 # 4) Definir controles firm-level y macro presentes
 # --------------------------------------------------
-controls_firm  <- c("rsales_g_std", "sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_std", "L1_sh_current_a_std")
 controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
 present_macro  <- intersect(controls_macro, names(df_dyn12))
 if (length(present_macro) < length(controls_macro)) {
@@ -729,7 +753,7 @@ df_dyn13 <- if (!all(vars13 %in% names(df_cntl13))) {
 
 # 4) Definir controles firm-level y macro
 # ----------------------------------------
-controls_firm13  <- c("rsales_g_std", "sh_current_a_std")
+controls_firm13  <- c("L1_rsales_g_std", "L1_sh_current_a_std")
 controls_macro13 <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn13))
 all_controls13   <- paste(c(controls_firm13, controls_macro13), collapse = " + ")
 
