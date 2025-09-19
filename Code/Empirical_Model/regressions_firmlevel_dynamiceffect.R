@@ -25,83 +25,85 @@ library(tidyr)
 library(kableExtra)
 
 
-# 0.1) winsorize “raw” para leverage y dd
+
+
+# =========================
+# Helpers (winsor/standard)
+# =========================
 winsorize <- function(x, p = 0.005) {
-  lo <- quantile(x, p, na.rm = TRUE)
-  hi <- quantile(x, 1 - p, na.rm = TRUE)
+  lo <- stats::quantile(x, p, na.rm = TRUE)
+  hi <- stats::quantile(x, 1 - p, na.rm = TRUE)
   pmin(pmax(x, lo), hi)
 }
 
-# helper: winsorize y de-mean leverage y dd dentro de cada firma
+# Winsoriza y calcula (i) de-mean y (ii) estándar dentro de firma
 prep_fin_vars <- function(df, p = 0.005) {
   df %>%
     dplyr::group_by(name) %>%
     dplyr::mutate(
       leverage_win = winsorize(leverage, p = p),
-      dd_win       = winsorize(dd, p = p),
-      lev_dm       = leverage_win - mean(leverage_win, na.rm = TRUE),
-      dd_dm        = dd_win - mean(dd_win, na.rm = TRUE)
+      dd_win       = winsorize(dd,       p = p),
+      # De-mean dentro de firma
+      lev_std       = leverage_win - mean(leverage_win, na.rm = TRUE),
+      dd_dm        = dd_win       - mean(dd_win,       na.rm = TRUE),
+      # Estandarización dentro de firma (comparabilidad entre gráficos)
+      lev_std      = (leverage_win - mean(leverage_win, na.rm = TRUE)) /
+        sd(leverage_win,  na.rm = TRUE),
+      dd_std       = (dd_win       - mean(dd_win,       na.rm = TRUE)) /
+        sd(dd_win,        na.rm = TRUE)
     ) %>%
     dplyr::ungroup()
 }
 
-# helper: winsorize and standardize the monetary shock within country
+# Winsoriza y estandariza el shock monetario por país (z-score)
 prep_shock_var <- function(df, p = 0.005) {
   safe_zscore <- function(x) {
     mu <- mean(x, na.rm = TRUE)
     sigma <- sd(x, na.rm = TRUE)
-    
-    if (!is.finite(sigma) || sigma == 0) {
-      return(ifelse(is.na(x), NA_real_, 0))
-    }
-    
+    if (!is.finite(sigma) || sigma == 0) return(ifelse(is.na(x), NA_real_, 0))
     (x - mu) / sigma
   }
-  
   df %>%
-    group_by(Country) %>%
-    mutate(
+    dplyr::group_by(Country) %>%
+    dplyr::mutate(
       shock_win = winsorize(shock, p = p),
-      shock     = safe_zscore(shock_win)
+      shock_z   = safe_zscore(shock_win)   # z-score por país
     ) %>%
-    ungroup()
+    dplyr::ungroup()
 }
 
-# 1) Leer base de datos y convertir fecha a trimestral
-# --------------------------------------------------------
+
+# ===========================================
+# Carga de datos y preprocesamiento consistente
+# ===========================================
 ruta_dta <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final/Data_Base_final.dta"
-df <- read_dta(ruta_dta) %>%
-  mutate(dateq = as.yearqtr(dateq)) %>%
-  arrange(name, dateq)
+df <- haven::read_dta(ruta_dta) %>%
+  dplyr::mutate(dateq = zoo::as.yearqtr(dateq)) %>%
+  dplyr::arrange(name, dateq)
 
-# 2) Preprocesamiento: dlog_capital, shock y winsorize leverage/dd
-# --------------------------------------------------------
+# dlog_capital (Δ log K) y limpieza básica
 df <- df %>%
-  arrange(name, dateq) %>%
-  group_by(name) %>%
-  mutate(
-    ratio_cap    = real_capital / lag(real_capital),
-    dlog_capital = suppressWarnings(ifelse(ratio_cap > 0, log(ratio_cap), NA_real_)),
-    dlog_capital = ifelse(is.finite(dlog_capital), dlog_capital, NA_real_),
-    shock        = -shock
+  dplyr::group_by(name) %>%
+  dplyr::arrange(dateq, .by_group = TRUE) %>%
+  dplyr::mutate(
+    ratio_cap    = real_capital / dplyr::lag(real_capital),
+    dlog_capital = dplyr::if_else(is.finite(ratio_cap) & ratio_cap > 0,
+                                  log(ratio_cap), NA_real_)
   ) %>%
-  select(-ratio_cap) %>%
-  ungroup() %>%
-  filter(!is.na(dlog_capital)) %>%
-  prep_fin_vars()
+  dplyr::ungroup() %>%
+  dplyr::select(-ratio_cap) %>%
+  dplyr::filter(!is.na(dlog_capital))
 
-# 3) Calcular dlog_gdp a nivel país y unirlo
-# --------------------------------------------------------
-gdp_country <- df %>%
-  distinct(Country, dateq, gdp) %>%
-  arrange(Country, dateq) %>%
-  group_by(Country) %>%
-  mutate(dlog_gdp = log(gdp) - log(lag(gdp))) %>%
-  ungroup()
-
+# Shock: winsor + z-score por país, luego cambio de signo y renombrar a 'shock1'
 df <- df %>%
-  left_join(gdp_country %>% select(Country, dateq, dlog_gdp),
-            by = c("Country", "dateq"))
+  prep_shock_var(p = 0.005) %>%
+  dplyr::mutate(shock1 = -shock_z) %>%   # MP>0 ≈ recorte (expansivo)
+  dplyr::select(-shock_win, -shock_z)    # limpiar intermedios; opcional: también -shock original
+
+# Leverage y dd: winsor + de-mean + estándar dentro de firma (una sola vez)
+df <- df %>%
+  prep_fin_vars(p = 0.005)
+
 
 # =================================================================
 # Figure 1: Respuesta dinámica de la inversión al shock monetario
@@ -153,7 +155,7 @@ if (!"sh_current_a_std" %in% names(df)) {
 # 2) Crear interacciones “raw” (winsorizadas) con el shock
 df <- df %>%
 mutate(
-  lev_shock = lev_dm * shock,
+  lev_shock = lev_std * shock,
   d2d_shock = dd_dm  * shock
 )
 
@@ -454,14 +456,14 @@ df <- prep_fin_vars(df)
 if ("dlog_gdp" %in% names(df)) {
   df <- df %>%
     mutate(
-      lev_shock_gdp = lev_dm * dlog_gdp,
+      lev_shock_gdp = lev_std * dlog_gdp,
       d2d_shock_gdp = dd_dm * dlog_gdp
     )
 }
 
 df <- df %>%
   mutate(
-    lev_shock = lev_dm * shock,
+    lev_shock = lev_std * shock,
     d2d_shock = dd_dm  * shock
   )
 
@@ -809,8 +811,8 @@ df_cntl13 <- df_cntl13 %>%
   mutate(
     size_shock    = size_win * shock,
     size_gdp      = size_win * dlog_gdp,
-    lev_shock     = lev_dm * shock,
-    lev_shock_gdp = lev_dm * dlog_gdp,
+    lev_shock     = lev_std * shock,
+    lev_shock_gdp = lev_std * dlog_gdp,
     d2d_shock     = dd_dm  * shock,
     d2d_shock_gdp = dd_dm  * dlog_gdp
   )
