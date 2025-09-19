@@ -64,7 +64,7 @@ function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapital
         error('Not enough post-shock periods available to compute the IRFs.');
     end
 
-    classificationIdx = min(tPre + 1, totalPeriods);
+    classificationIdx = max(1, min(tPre, totalPeriods))
     epsilon = 1e-12;
 
     timeIndices = tPre + (0:horizon);
@@ -87,11 +87,11 @@ function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapital
     irfDistanceFar = NaN(numel(quarters),1);
 
     validLeverage = (mInSampleShock(:,classificationIdx) == 1) & (mInSampleBase(:,classificationIdx) == 1);
-    validLeverage = validLeverage & isfinite(mDebtPanel(:,classificationIdx)) & (mCapitalPanelShock(:,classificationIdx) > 0);
+    validLeverage = validLeverage & isfinite(mDebtPanel(:,classificationIdx)) & (mCapitalPanelBase(:,classificationIdx) > 0);
     if ~any(validLeverage)
         error('No valid observations to compute leverage groups at the classification period.');
     end
-    leverageMeasure = mDebtPanel(:,classificationIdx) ./ max(mCapitalPanelShock(:,classificationIdx),1e-8);
+    leverageMeasure = mDebtPanel(:,classificationIdx) ./ max(mCapitalPanelBase(:,classificationIdx),1e-8);
     leverageMeasure(~validLeverage) = NaN;
     leverageQuantiles = quantile(leverageMeasure(validLeverage), quantiles);
     groupLowLeverage = leverageMeasure <= leverageQuantiles(1);
