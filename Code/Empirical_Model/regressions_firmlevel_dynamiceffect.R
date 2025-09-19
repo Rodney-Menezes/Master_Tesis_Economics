@@ -26,7 +26,6 @@ library(kableExtra)
 
 
 
-
 # =========================
 # Helpers (winsor/standard)
 # =========================
@@ -131,7 +130,7 @@ if (!"size_raw" %in% names(df)) {
     group_by(name) %>%
     arrange(dateq) %>%
     mutate(
-      size_raw = (log(atq) + saleq) / 2
+      size_raw = (log(atq) + log (saleq)) / 2
     ) %>%
     ungroup()
 }
@@ -571,7 +570,7 @@ mutate(
     else rsales_g_std,
     
     # winsorización de tamaño bruto
-    size_raw = (log(atq) + saleq) / 2,
+    size_raw = (log(atq) + log(saleq)) / 2,
     size_win = winsorize(size_raw),
     
     # liquidez corriente estandarizada
@@ -692,7 +691,7 @@ df_cntl13 <- df_cntl13 %>%
   arrange(dateq) %>%
   mutate(
     # tamaño proxy bruto sin estandarizar
-    size_raw = (log(atq) + saleq) / 2,
+    size_raw = (log(atq) + log (saleq)) / 2,
     size_win = winsorize(size_raw)
   ) %>%
   ungroup() %>%
