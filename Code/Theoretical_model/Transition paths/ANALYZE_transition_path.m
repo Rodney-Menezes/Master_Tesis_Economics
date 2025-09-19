@@ -245,7 +245,6 @@ transition_path_decisions;
 % Aggregate series
 transition_path_update_aggregates;
 
-
 %----------------------------------------------------------------
 % Impulse response plots from paper
 %----------------------------------------------------------------
@@ -285,7 +284,7 @@ plot(vTime,100 * log(vAggregateConsumption(1:T,1) / aggregateConsumptionSS),'lin
 plot(vTime,100 * log(vAggregateInvestment(1:T,1) / (aggregateInvestmentSS)),'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
 xlim([1 10])
-h	 = legend('Output','Consumption','Investment');
+h	 = legend('Output','Consumption','Investment', 'Net inv');
 set(h,'interpreter','latex','location','northeast','fontsize',14)
 set(gcf,'color','w')
 xlabel('Quarters','interpreter','latex')
@@ -313,6 +312,23 @@ hold off
 print('../Results/agg_transmission_mechanism.eps','-depsc')
 
 
+%%%
+% Investment IRFs by heterogeneity channels
+%%%
+
+% Use firms with at least seven years of pre-shock history (28 quarters)
+% to classify heterogeneity groups and compute the impulse responses.
+tPre                              = 7 * 4;
+transition_path_panel;
+eval(sprintf('mTransitionPanel_%d = mTransitionPanel;',tPre));
+
+irfHetResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPanel, ...
+                                            mDebtPanel,mCashPanel,mDefaultCutoffPanel, ...
+                                            mInSample,tPre);
+set(irfHetResults.figure,'PaperUnits','inches','PaperPosition',[0 0 10 4]);
+print(irfHetResults.figure,'../Results/investment_irf_heterogeneity.eps','-depsc');
+
+tPreHeterogeneity                 = tPre;
 
 
 
@@ -407,6 +423,10 @@ print('../Results/rep_firm_comparison.eps','-depsc')
 vCutoffRange		= [7;9;11;13;15;17;19;21;23;25;27;29];
 for iCutoff = 1:12
 	tPre 	= vCutoffRange(iCutoff) * 4; % select firms who have survived at least tPre years
+		% The heterogeneity IRFs above already simulated this cutoff; reuse stored results.
+        if exist('tPreHeterogeneity','var') && (tPre == tPreHeterogeneity)
+                continue;
+        end
 	transition_path_panel;				 % simulate the transition path
 	eval(sprintf('mTransitionPanel_%d = mTransitionPanel;',tPre));
 end
