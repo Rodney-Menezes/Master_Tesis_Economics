@@ -322,9 +322,60 @@ tPre                              = 7 * 4;
 transition_path_panel;
 eval(sprintf('mTransitionPanel_%d = mTransitionPanel;',tPre));
 
-irfHetResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPanel, ...
+T_panel = size(mCapitalPanel,2);
+N_panel = size(mCapitalPanel,1);
+
+mStatePanelBaseline = zeros(N_panel,3);
+mStatePanelBaseline(:,1) = mmuEnt + ssigmaEnt * vInitialProductivity;
+mStatePanelBaseline(:,2) = k0;
+mStatePanelBaseline(:,3) = b0;
+
+mCapitalPanelBaseline = zeros(N_panel,T_panel);
+mInSampleBaseline = ones(N_panel,T_panel);
+mExitPanelBaseline = zeros(N_panel,T_panel);
+mDefaultPanelBaseline = zeros(N_panel,T_panel);
+
+for tBaseline = 1:T_panel
+    vProfitsBaseline =  A * (exp(mStatePanelBaseline(:,1)) .^ (1 / (1 - nnu))) .* ...
+        ((exp(mCapitalQuality(:,tBaseline)) .* mStatePanelBaseline(:,2)) .^ tthetaHat) .* ...
+        (wage ^ (-nnu / (1 - nnu)));
+    vCashBaseline = vProfitsBaseline + qSS * (1 - ddelta) * exp(mCapitalQuality(:,tBaseline)) .* ...
+        mStatePanelBaseline(:,2) - mStatePanelBaseline(:,3) - ppsi_0;
+
+    vProdBaseline = min(max(prodMin * ones(N_panel,1), mStatePanelBaseline(:,1)), prodMax * ones(N_panel,1));
+    vCashBaseline = min(max(cashMin * ones(N_panel,1), vCashBaseline), cashMax * ones(N_panel,1));
+
+    vDefaultCutoffBaseline = interpn(vProdGrid, vDefaultCutoffSS, vProdBaseline);
+    vCapitalPrimeBaseline = interpn(mProdGrid, mCashGrid, mCapitalPrimeSS, vProdBaseline, vCashBaseline);
+    vDebtPrimeBaseline = interpn(mProdGrid, mCashGrid, mDebtPrimeSS, vProdBaseline, vCashBaseline);
+
+    mExitPanelBaseline(:,tBaseline) = (mExitShocks(:,tBaseline) <= ppiExit);
+    mDefaultPanelBaseline(:,tBaseline) = mExitPanelBaseline(:,tBaseline) .* (vCashBaseline <= 0) + ...
+        (1 - mExitPanelBaseline(:,tBaseline)) .* (vCashBaseline <= vDefaultCutoffBaseline);
+
+    mCapitalPanelBaseline(:,tBaseline) = mStatePanelBaseline(:,2);
+
+    mStatePanelBaseline(:,1) = rrhoProd * mStatePanelBaseline(:,1) + ssigmaProd * mProductivityShocks(:,tBaseline);
+    mStatePanelBaseline(:,2) = vCapitalPrimeBaseline;
+    mStatePanelBaseline(:,3) = vDebtPrimeBaseline / inflationSS;
+end
+
+for tBaseline = 1:T_panel
+    if tBaseline < T_panel
+        exitMaskBaseline = (mExitPanelBaseline(:,tBaseline) == 1);
+        if any(exitMaskBaseline)
+            mInSampleBaseline(exitMaskBaseline, tBaseline+1:end) = 0;
+        end
+    end
+    defaultMaskBaseline = (mDefaultPanelBaseline(:,tBaseline) == 1);
+    if any(defaultMaskBaseline)
+        mInSampleBaseline(defaultMaskBaseline, tBaseline:end) = 0;
+    end
+end
+
+irfHetResults = impulse_response_heterogeneity(mCapitalPanel,mCapitalPanelBaseline, ...
                                             mDebtPanel,mCashPanel,mDefaultCutoffPanel, ...
-                                            mInSample,tPre);
+											mInSample,mInSampleBaseline,tPre);
 set(irfHetResults.figure,'PaperUnits','inches','PaperPosition',[0 0 10 4]);
 print(irfHetResults.figure,'../Results/investment_irf_heterogeneity.eps','-depsc');
 
@@ -334,9 +385,9 @@ tPreHeterogeneity                 = tPre;
 % Investment IRFs with continuous heterogeneity (demeaned within firm)
 %%%
 
-irfContinuousResults = impulse_response_continuous_heterogeneity(mInvestmentPanel,mCapitalPanel, ...
+irfContinuousResults = impulse_response_continuous_heterogeneity(mCapitalPanel,mCapitalPanelBaseline, ...
                                                             mDebtPanel,mCashPanel,mDefaultCutoffPanel, ...
-                                                            mInSample,tPre);
+                                                            mInSample,mInSampleBaseline,tPre);
 set(irfContinuousResults.figure,'PaperUnits','inches','PaperPosition',[0 0 10 4]);
 print(irfContinuousResults.figure,'../Results/investment_irf_continuous_heterogeneity.eps','-depsc');
 
