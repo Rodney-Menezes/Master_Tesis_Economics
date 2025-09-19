@@ -149,6 +149,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     xlabel('Trimestres');
     ylabel({'Variación acumulada de la tasa de inversión', ...
         '(p.p. inv./capital vs. estado estacionario, por 1 unidad)'});
+    title('Apalancamiento (centrado por firma)');
     hold off;
 
     subplot(1,2,2);
