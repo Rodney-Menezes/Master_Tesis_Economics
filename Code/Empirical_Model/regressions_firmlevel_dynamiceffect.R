@@ -72,6 +72,25 @@ prep_shock_var <- function(df, p = 0.005) {
     dplyr::ungroup()
 }
 
+# Winsoriza, de-mean y estandariza controles firm-level dentro de firma
+prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
+  win_sym <- rlang::sym(paste0(prefix, "_win"))
+  dm_sym  <- rlang::sym(paste0(prefix, "_dm"))
+  std_sym <- rlang::sym(paste0(prefix, "_std"))
+  var_sym <- rlang::sym(var_in)
+
+  df %>%
+    dplyr::group_by(name) %>%
+    dplyr::mutate(
+      !!win_sym := winsorize(!!var_sym, p = p)
+    ) %>%
+    dplyr::mutate(
+      !!dm_sym  := !!win_sym - mean(!!win_sym, na.rm = TRUE),
+      !!std_sym := safe_scale(!!win_sym)
+    ) %>%
+    dplyr::ungroup()
+}
+
 
 # ===========================================
 # Carga de datos y preprocesamiento consistente
@@ -112,41 +131,29 @@ df <- df %>%
 # =================================================================
 
 # 1) Controles firm-level y estandarización de ventas, tamaño y liquidez
-if (!"rsales_g_std" %in% names(df)) {
-  df <- df %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      rsales_g_std = {
-        x <- log(saleq) - log(lag(saleq))
-        (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
-      }
-    ) %>%
-    ungroup()
-}
+df <- df %>%
+  dplyr::group_by(name) %>%
+  dplyr::arrange(dateq, .by_group = TRUE) %>%
+  dplyr::mutate(
+    rsales_g = log(saleq) - log(dplyr::lag(saleq))
+  ) %>%
+  dplyr::ungroup()
+
+df <- df %>%
+  prep_ctrl_var(var_in = "rsales_g", prefix = "rsales_g", p = 0.005)
 
 if (!"size_raw" %in% names(df)) {
   df <- df %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
+    dplyr::group_by(name) %>%
+    dplyr::arrange(dateq) %>%
+    dplyr::mutate(
       size_raw = (log(atq) + log (saleq)) / 2
     ) %>%
-    ungroup()
+    dplyr::ungroup()
 }
 
-if (!"sh_current_a_std" %in% names(df)) {
-  df <- df %>%
-    group_by(name) %>%
-    arrange(dateq) %>%
-    mutate(
-      sh_current_a_std = {
-        x <- current_ratio
-        (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
-      }
-    ) %>%
-    ungroup()
-}
+df <- df %>%
+  prep_ctrl_var(var_in = "current_ratio", prefix = "sh_current_a", p = 0.005)
 
 # 2) Crear interacciones “raw” (winsorizadas) con el shock
 df <- df %>%
@@ -188,7 +195,7 @@ res_lev_nocy <- map(0:12, function(h) {
       " | name + sec + dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ Country
+    cluster = ~ Country + dateq + name
   )
 })
 res_dd_nocy <- map(0:12, function(h) {
@@ -198,7 +205,7 @@ res_dd_nocy <- map(0:12, function(h) {
       " | name + sec + dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ Country
+    cluster = ~ Country + dateq + name
   )
 })
 
@@ -291,7 +298,7 @@ res_avg <- map(0:12, function(h) {
     " ~ shock_std + lev_shock + d2d_shock + ", all_controls,
     " | name + sec + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country)
+  feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
 })
 
 # 6) Extraer coeficientes y errores estándar para 'shock_std'
@@ -400,7 +407,7 @@ res_lev_lag <- map(0:12, function(h) {
     base_controls
   )
   fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + dateq")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country)
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq + name)
 })
 
 res_dd_lag <- map(0:12, function(h) {
@@ -412,7 +419,7 @@ res_dd_lag <- map(0:12, function(h) {
     base_controls
   )
   fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + dateq")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country)
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq + name)
 })
 
 # 7) Extraer coeficientes y errores para plot
@@ -518,7 +525,7 @@ res_avg <- map(0:12, function(h) {
     " ~ shock_std + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
     " | name + sec + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country)
+  feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
 })
 
 # 7) Extraer coeficientes y errores estándar para 'shock_std'
@@ -553,33 +560,25 @@ print(p_avg)
 # Figura 5: Dinámica de Respuestas al Shock Monetario por Tamaño 
 # ======================================================================
 
-# Partimos de df original
-df_cntl <- df
-
-# 1) Calcular ventas, liquidez y winsorización de tamaño y apalancamiento
-# ------------------------------------------------------------------------
-
 df_cntl <- df_cntl %>%
-group_by(name) %>%
-arrange(dateq, .by_group = TRUE) %>%
-mutate(
-    #  crecimiento de ventas
-    rsales_g = if (!"rsales_g" %in% names(.)) log(saleq) - log(lag(saleq)) else rsales_g,
-    rsales_g_std = if (!"rsales_g_std" %in% names(.))
-      (rsales_g - mean(rsales_g, na.rm = TRUE)) / sd(rsales_g, na.rm = TRUE)
-    else rsales_g_std,
-    
-    # winsorización de tamaño bruto
-    size_raw = (log(atq) + log(saleq)) / 2,
-    size_win = winsorize(size_raw),
-    
-    # liquidez corriente estandarizada
-    sh_current_a_std = if (!"sh_current_a_std" %in% names(.))
-      (current_ratio - mean(current_ratio, na.rm = TRUE)) / sd(current_ratio, na.rm = TRUE)
-    else sh_current_a_std
-) %>%
-  ungroup() %>%
-  select(-size_raw) %>%
+  dplyr::group_by(name) %>%
+  dplyr::arrange(dateq, .by_group = TRUE) %>%
+  dplyr::mutate(
+    # crecimiento de ventas
+    rsales_g = log(saleq) - log(dplyr::lag(saleq)),
+    # tamaño bruto sin estandarizar
+    size_raw = (log(atq) + log(saleq)) / 2
+  ) %>%
+  dplyr::ungroup() %>%
+  prep_ctrl_var(var_in = "rsales_g", prefix = "rsales_g", p = 0.005) %>%
+  prep_ctrl_var(var_in = "current_ratio", prefix = "sh_current_a", p = 0.005) %>%
+  dplyr::group_by(name) %>%
+  dplyr::arrange(dateq, .by_group = TRUE) %>%
+  dplyr::mutate(
+    size_win = winsorize(size_raw)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-size_raw) %>%
   prep_fin_vars()
 
 # 2) Crear interacciones size × GDP y size × shock
@@ -645,7 +644,7 @@ res_size <- map(0:12, function(h) {
       " | name + sec + dateq"
     )),
     data    = df_dyn12,
-    cluster = ~ Country
+    cluster = ~ Country + dateq + name
   )
 })
 
@@ -745,7 +744,7 @@ res_lev_size <- map(0:12, function(h) {
       " | name + sec + dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ Country
+    cluster = ~ Country + dateq + name
   )
 })
 
@@ -758,7 +757,7 @@ res_dd_size <- map(0:12, function(h) {
       " | name + sec + dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ Country
+    cluster = ~ Country + dateq + name
   )
 })
 
