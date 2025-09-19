@@ -159,7 +159,7 @@ function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapital
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    yylabel({'Variación log capital', ...
+    ylabel({'Variación log capital', ...
         '(p.p. vs. base sin shock)'});
     title('Canal de apalancamiento');
     legend({'Bajo apalancamiento','Alto apalancamiento'},'Location','best');
