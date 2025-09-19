@@ -717,8 +717,6 @@ ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
   theme_minimal()
 
 
-
-
 # ==============================================================
 # Figura 6: Dinámica Conjunta de Posición Financiera y Tamaño 
 # ==============================================================
@@ -739,15 +737,29 @@ df_cntl13 <- df_cntl13 %>%
 
 # 2) Crear interacciones con shock y dlog_gdp
 # -------------------------------------------
+has_gdp_cntl13 <- "dlog_gdp" %in% names(df_cntl13)
+
+if (!"shock_exp" %in% names(df_cntl13)) {
+  stop("Falta la variable 'shock_exp' en el data frame.")
+}
+
 df_cntl13 <- df_cntl13 %>%
-  mutate(
-    size_shock    = size_win * shock_exp,
-    size_gdp      = size_win * dlog_gdp,
-    lev_shock     = L1_lev_dm * shock_exp,
-    lev_shock_gdp = L1_lev_dm * dlog_gdp,
-    d2d_shock     = L1_dd_dm  * shock_exp,
-    d2d_shock_gdp = L1_dd_dm  * dlog_gdp
+  dplyr::mutate(
+    size_shock = size_win * shock_exp,
+    lev_shock  = L1_lev_dm * shock_exp,
+    d2d_shock  = L1_dd_dm  * shock_exp
   )
+
+if (has_gdp_cntl13) {
+  df_cntl13 <- df_cntl13 %>%
+    dplyr::mutate(
+      size_gdp      = size_win * dlog_gdp,
+      lev_shock_gdp = L1_lev_dm * dlog_gdp,
+      d2d_shock_gdp = L1_dd_dm  * dlog_gdp
+    )
+} else {
+  warning("No existe 'dlog_gdp'; se omiten interacciones con el ciclo.")
+}
 
 # 3) Construir dlog_capital y dinámicas cumFh_dlog_capital
 # ---------------------------------------------------------
@@ -773,14 +785,18 @@ df_dyn13 <- if (!all(vars13 %in% names(df_cntl13))) {
 # ----------------------------------------
 controls_firm13  <- c("L1_rsales_g_win", "L1_current_ratio_win")
 controls_macro13 <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn13))
-all_controls13   <- paste(c(controls_firm13, controls_macro13), collapse = " + ")
+controls_vec13   <- c(controls_firm13, controls_macro13)
+rhs_lev13_terms  <- c("size_shock", "lev_shock", if (has_gdp_cntl13) "lev_shock_gdp" else NULL, controls_vec13)
+rhs_dd13_terms   <- c("size_shock", "d2d_shock", if (has_gdp_cntl13) "d2d_shock_gdp" else NULL, controls_vec13)
+rhs_lev13        <- paste(rhs_lev13_terms, collapse = " + ")
+rhs_dd13         <- paste(rhs_dd13_terms, collapse = " + ")
 
 # 4a) Estimar dinámica Size + Leverage
 res_lev_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars13[h+1],
-      " ~ size_shock + lev_shock + lev_shock_gdp + ", all_controls13,
+      " ~ ", rhs_lev13,
       " | name + sec + dateq"
     )),
     data    = df_dyn13,
@@ -793,7 +809,7 @@ res_dd_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars13[h+1],
-      " ~ size_shock + d2d_shock + d2d_shock_gdp + ", all_controls13,
+      " ~ ", rhs_dd13,
       " | name + sec + dateq"
     )),
     data    = df_dyn13,
