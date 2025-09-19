@@ -49,6 +49,7 @@ mDebtPanel                   = zeros(N,T_panel);
 mCapitalAdjustedPanel	     = zeros(N,T_panel);
 mInterestRatePanel           = zeros(N,T_panel);
 mUnconstrainedPanel		     = zeros(N,T_panel);
+mDefaultCutoffPanel		     = zeros(N,T_panel);
 
 % Initialize state variables
 mStatePanel(:,1)		     = mmuEnt + ssigmaEnt * vInitialProductivity;
@@ -78,7 +79,8 @@ for t = 1 : tPre
 
 	% Interpolate
 	vDefaultCutoffPanel			= interpn(vProdGrid,vDefaultCutoffSS,vProdPanel);
-    vUnconstrainedCutoffPanel   = interpn(vProdGrid,vUnconstrainedCutoffSS,vProdPanel);
+    mDefaultCutoffPanel(:,t)    = vDefaultCutoffPanel;
+	vUnconstrainedCutoffPanel   = interpn(vProdGrid,vUnconstrainedCutoffSS,vProdPanel);
 	vCapitalPrimePanel			= interpn(mProdGrid,mCashGrid,mCapitalPrimeSS,vProdPanel,vCashPanel);
     vDebtPricePanel         	= interpn(mProdGrid,mCashGrid,mDebtPriceOptimalSS,vProdPanel,vCashPanel);
 	vDebtPrimePanel				= interpn(mProdGrid,mCashGrid,mDebtPrimeSS,vProdPanel,vCashPanel);
@@ -156,7 +158,8 @@ for t = tPre+1 : T_panel
 
 	% Interpolate
 	vDefaultCutoffPanel			= interpn(vProdGrid,mDefaultCutoffSeries(:,t-tPre),vProdPanel);
- 	vUnconstrainedCutoffPanel	= interpn(vProdGrid,mUnconstrainedCutoffSeries(:,t-tPre),vProdPanel);
+ 	mDefaultCutoffPanel(:,t)    = vDefaultCutoffPanel;
+	vUnconstrainedCutoffPanel	= interpn(vProdGrid,mUnconstrainedCutoffSeries(:,t-tPre),vProdPanel);
 	vCapitalPrimePanel			= interpn(mProdGrid,mCashGrid,reshape(mCapitalPrimeSeries(:,t-tPre),nProd,nCash),vProdPanel,vCashPanel);
     vDebtPricePanel         	= interpn(mProdGrid,mCashGrid,reshape(mDebtPriceOptimalSeries(:,t-tPre),nProd,nCash),vProdPanel,vCashPanel);
 	vDebtPrimePanel				= interpn(mProdGrid,mCashGrid,reshape(mDebtPrimeSeries(:,t-tPre),nProd,nCash),vProdPanel,vCashPanel);
