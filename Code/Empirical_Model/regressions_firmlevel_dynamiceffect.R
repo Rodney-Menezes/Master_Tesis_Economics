@@ -44,33 +44,35 @@ safe_scale <- function(x) {
   (x - mu) / sigma
 }
 
-# Winsoriza y estandariza leverage y dd a nivel global
+# Winsoriza y estandariza leverage y dd a nivel país
 prep_fin_vars <- function(df, p = 0.005) {
   df <- dplyr::ungroup(df)
 
   df %>%
+    dplyr::group_by(Country) %>%
     dplyr::mutate(
       leverage_win = winsorize(leverage, p = p),
-      dd_win       = winsorize(dd,       p = p)
+      dd_win       = winsorize(dd,       p = p),
+      lev_std      = safe_scale(leverage_win),
+      dd_std       = safe_scale(dd_win)
     ) %>%
-    dplyr::mutate(
-      lev_std = safe_scale(leverage_win),
-      dd_std  = safe_scale(dd_win)
-    )
+    dplyr::ungroup()
 }
 
-# Winsoriza y estandariza el shock monetario a nivel global (z-score)
+# Winsoriza y estandariza el shock monetario a nivel país (z-score)
 prep_shock_var <- function(df, p = 0.005) {
   df <- dplyr::ungroup(df)
 
   df %>%
+    dplyr::group_by(Country) %>%
     dplyr::mutate(
       shock_win = winsorize(shock, p = p),
-      shock_z   = safe_scale(shock_win)   # z-score global
-    )
+      shock_z   = safe_scale(shock_win)   # z-score por país
+    ) %>%
+    dplyr::ungroup()
 }
 
-# Winsoriza y estandariza controles firm-level a nivel global
+# Winsoriza y estandariza controles firm-level a nivel país
 prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
   df <- dplyr::ungroup(df)
 
@@ -79,12 +81,12 @@ prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
   var_sym <- rlang::sym(var_in)
 
   df %>%
+    dplyr::group_by(Country) %>%
     dplyr::mutate(
-      !!win_sym := winsorize(!!var_sym, p = p)
-    ) %>%
-    dplyr::mutate(
+      !!win_sym := winsorize(!!var_sym, p = p),
       !!std_sym := safe_scale(!!win_sym)
-    )
+    ) %>%
+    dplyr::ungroup()
 }
 
 # Crea rezagos (por defecto, un periodo) de los controles firm-level dentro de firma
