@@ -3,7 +3,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
 %   irfResults = IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY(mInvestmentPanel,
 %   mCapitalPanel,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSample,tPre)
 %   calculates the cumulative impulse-response functions of investment
-%   rates (investment-to-capital) when heterogeneity is summarized by
+%   rates (investment-to-capital) expressed as accumulated percentage-point
+%   deviations from the steady state when heterogeneity is summarized by
 %   continuous (demeaned) leverage and distance-to-default measures rather
 %   than discrete quantile groups.
 %
@@ -146,8 +147,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel('p.p. (1 s.d. sobre la media)');
-    title('Apalancamiento (centrado por firma)');
+    ylabel({'Variación acumulada de la tasa de inversión', ...
+        '(p.p. inv./capital vs. estado estacionario, por 1 unidad)'});
     hold off;
 
     subplot(1,2,2);
@@ -156,7 +157,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel('p.p. acumulados (por 1 unidad)');
+    ylabel({'Variación acumulada de la tasa de inversión', ...
+        '(p.p. inv./capital vs. estado estacionario, por 1 unidad)'});
     title('Distancia al default (centrada por firma)');
     hold off;
 
