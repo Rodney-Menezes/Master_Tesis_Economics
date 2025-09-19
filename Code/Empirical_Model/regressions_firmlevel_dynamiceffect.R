@@ -44,12 +44,12 @@ safe_scale <- function(x) {
   (x - mu) / sigma
 }
 
-# Winsoriza y estandariza leverage y dd a nivel país-fecha
+# Winsoriza y estandariza leverage y dd a nivel país
 prep_fin_vars <- function(df, p = 0.005) {
   df <- dplyr::ungroup(df)
 
   df %>%
-    dplyr::group_by(Country, dateq) %>%
+    dplyr::group_by(Country) %>%
     dplyr::mutate(
       leverage_win = winsorize(leverage, p = p),
       dd_win       = winsorize(dd,       p = p),
@@ -59,20 +59,20 @@ prep_fin_vars <- function(df, p = 0.005) {
     dplyr::ungroup()
 }
 
-# Winsoriza y estandariza el shock monetario a nivel país-fecha (z-score)
+# Winsoriza y estandariza el shock monetario a nivel país (z-score)
 prep_shock_var <- function(df, p = 0.005) {
   df <- dplyr::ungroup(df)
 
   df %>%
-    dplyr::group_by(Country, dateq) %>%
+    dplyr::group_by(Country) %>%
     dplyr::mutate(
       shock_win = winsorize(shock, p = p),
-      shock_z   = safe_scale(shock_win)   # z-score por país-fecha
+      shock_z   = safe_scale(shock_win)   # z-score por país
     ) %>%
     dplyr::ungroup()
 }
 
-# Winsoriza y estandariza controles firm-level a nivel país-fecha
+# Winsoriza y estandariza controles firm-level a nivel país
 prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
   df <- dplyr::ungroup(df)
 
@@ -81,7 +81,7 @@ prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
   var_sym <- rlang::sym(var_in)
 
   df %>%
-    dplyr::group_by(Country, dateq) %>%
+    dplyr::group_by(Country) %>%
     dplyr::mutate(
       !!win_sym := winsorize(!!var_sym, p = p),
       !!std_sym := safe_scale(!!win_sym)
@@ -131,13 +131,13 @@ df <- df %>%
   dplyr::select(-ratio_cap) %>%
   dplyr::filter(!is.na(dlog_capital))
 
-# Shock: winsor + z-score país-fecha, luego cambio de signo
+# Shock: winsor + z-score global, luego cambio de signo
 df <- df %>%
   prep_shock_var(p = 0.005) %>%
   dplyr::mutate(shock_std = -shock_z) %>%   # MP>0 ≈ recorte (expansivo)
   dplyr::select(-shock_win, -shock_z)    # limpiar intermedios; opcional: también -shock original
 
-# Leverage y dd: winsor + estándar país-fecha (una sola vez)
+# Leverage y dd: winsor + estándar global (una sola vez)
 df <- df %>%
   prep_fin_vars(p = 0.005)
 
@@ -261,45 +261,13 @@ res_dd_nocy <- map(0:12, function(h) {
 # 6) Extraer coeficientes y errores estándar
 dyn_lev_nocy <- tibble(
   horizon = 0:12,
-  beta    = map_dbl(res_lev_nocy, ~ {
-    coefs <- coef(.x)
-    if ("lev_shock" %in% names(coefs)) {
-      coefs[["lev_shock"]]
-    } else {
-      NA_real_
-    }
-  }),
-  se      = map_dbl(res_lev_nocy, ~ {
-    vc <- tryCatch(vcov(.x), error = function(e) NULL)
-    if (!is.null(vc) &&
-        "lev_shock" %in% rownames(vc) &&
-        "lev_shock" %in% colnames(vc)) {
-      sqrt(vc["lev_shock", "lev_shock"])
-    } else {
-      NA_real_
-    }
-  })
+  beta    = map_dbl(res_lev_nocy, ~ coef(.x)["lev_shock"]),
+  se      = map_dbl(res_lev_nocy, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
 )
 dyn_dd_nocy <- tibble(
   horizon = 0:12,
-  beta    = map_dbl(res_dd_nocy, ~ {
-    coefs <- coef(.x)
-    if ("d2d_shock" %in% names(coefs)) {
-      coefs[["d2d_shock"]]
-    } else {
-      NA_real_
-    }
-  }),
-  se      = map_dbl(res_dd_nocy, ~ {
-    vc <- tryCatch(vcov(.x), error = function(e) NULL)
-    if (!is.null(vc) &&
-        "d2d_shock" %in% rownames(vc) &&
-        "d2d_shock" %in% colnames(vc)) {
-      sqrt(vc["d2d_shock", "d2d_shock"])
-    } else {
-      NA_real_
-    }
-  })
+  beta    = map_dbl(res_dd_nocy, ~ coef(.x)["d2d_shock"]),
+  se      = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
 )
 
 # 7) Graficar Figura 1
@@ -548,7 +516,7 @@ if (!"Ldl_capital" %in% names(df)) {
     ungroup()
 }
 
-# 2) Winsorizar y estandarizar leverage y dd a nivel país-fecha
+# 2) Winsorizar y estandarizar leverage y dd a nivel global
 # ----------------------------------------------------------
 df <- prep_fin_vars(df)
 
