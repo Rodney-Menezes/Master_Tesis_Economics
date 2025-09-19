@@ -5,9 +5,8 @@
 global nProd nCash nCapital nDebt nCashDist nCapitalDist nDebtDist vProdGrid mProdTransition vProdErgodic ...
 		prodMinMult prodMaxMult cashMinMult cashMaxMult capitalMinMult capitalMaxMult ...
 		debtMinMult debtMaxMult capitalMinDistMult cashPower capitalPower debtPower cashPowerDist ...
-		prodMin prodMax capitalMinDist T maxIterationsMIT toleranceMIT dampeningY dampeningQ dampeningPi ...
-		dampeningR_nom dampeningMu dampeningNewton wageMin wageMax vProdGrid mProdTransition vProdErgodic ...
-		vOmegaGrid vOmegaWeights mShocksGrid omegaMin omegaMax nShocks nOmega mShocksTransition
+		prodMin prodMax capitalMinDist T wageMin wageMax vProdGrid mProdTransition vProdErgodic ...
+		vOmegaGrid vOmegaWeights mShocksGrid omegaMin omegaMax nShocks nOmega mShocksTransition lambda0 alpha
 
 
 %%%
@@ -27,7 +26,6 @@ nDebtDist				 = 100;								% debt
 
 % Number of grid points for capital quality shocks
 nOmega					 = 10;
-
 
 %%%
 % Parameters controlling the grid spacing
@@ -53,6 +51,8 @@ capitalPower				= .6;								% capital
 debtPower					= .6;								% debt
 
 
+
+
 %%%
 % Compute bounds of grids which are already known
 %%%
@@ -67,6 +67,10 @@ omegaMax				= omegaMaxMult * ssigmaOmega;
 
 % Capital min for distribution
 capitalMinDist			= capitalMinDistMult * k0;
+
+
+
+
 
 
 %%%
@@ -88,6 +92,9 @@ mShocksGrid							= [mProdGridShocks(:) mOmegaGridShocks(:)];
 % Make a combined transition matrix
 mShocksTransition		= reshape(repmat(reshape(mProdTransition,nProd,nProd,1),[1 1 nOmega]) .* repmat(reshape(vOmegaWeights,...
 							1,1,nOmega),[nProd nProd 1]),nProd,nShocks);
+
+
+
 
 
 %%%
@@ -118,3 +125,10 @@ maxIterationsMIT		= 10000;
 
 wageMin         = .8 * wRepSS;
 wageMax         = 1.05 * wRepSS;
+
+
+% ========== NUEVO: parámetros de la restricción financiera =========
+%%%
+lambda0         = 5;    % coeficiente base de apalancamiento (λ₀)
+alpha           = 2;    % sensibilidad del apalancamiento al riesgo soberano (α)
+%%% ====================================================================

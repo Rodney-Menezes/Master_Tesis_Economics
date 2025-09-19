@@ -23,9 +23,23 @@ mShocksTransition = sParms.mShocksTransition;
 nOmega     = sParms.nOmega;
 capitalMin = sParms.capitalMin;
 
+% NUEVO: parámetros de la restricción financiera
+    lambda0 = 5;    % λ₀: coeficiente base de apalancamiento
+    alpha   = 2;      % α: sensibilidad al riesgo soberano
+    s_t     = 0;        % estado actual de riesgo soberano
+% fin NUEVO
+
 % Extract candidate choices
 kPrime	= max(x(1),capitalMin + 1e-10);
 bPrime	= x(2);
+
+
+% NUEVO: cálculo de la restricción b' ≤ λ(s_t)·n_jt
+    n_j      = mCashGrid(iProd,iCash);                 % patrimonio neto actual
+    lambda_s = lambda0 * exp(-alpha * s_t);            % λ(s_t)
+    ineq_fin = bPrime - lambda_s * n_j;                % debe ser ≤ 0
+% fin NUEVO
+
 
 %---------------------------------------------------------------
 % Compute next period's cash for different realizations of shock
@@ -55,6 +69,8 @@ debtPrice           = min(bbeta,max(0,mShocksTransition(iProd,:) * (bbeta * (1 -
 %---------------------------------------------------------------
 % Compute dividends and return constraint
 %---------------------------------------------------------------
+dividend_constraint = qSS * kPrime - mCashGrid(iProd,iCash) - debtPrice * bPrime;
 
-c		= qSS * kPrime - mCashGrid(iProd,iCash) - debtPrice * bPrime;
-ceq		= [];
+c   = [ dividend_constraint;   % restricción de dividendos
+        ineq_fin ];           % restricción financiera nueva (b' ≤ λ(s_t)·n_j)
+ceq = [];                      % sin restricciones de igualdad
