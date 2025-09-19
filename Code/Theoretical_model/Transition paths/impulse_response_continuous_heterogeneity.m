@@ -1,13 +1,13 @@
-function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel,mCapitalPanel,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSample,tPre,varargin)
-%IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY Compute IRFs using continuous heterogeneity measures.
-%   irfResults = IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY(mInvestmentPanel,
-%   mCapitalPanel,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSample,tPre)
-%   calculates the cumulative impulse-response functions of investment
-%   rates (investment-to-capital) expressed as accumulated percentage-point
-%   deviations from a post-shock baseline ("línea base") when heterogeneity
-%   is summarized by
-%   continuous (demeaned) leverage and distance-to-default measures rather
-%   than discrete quantile groups.
+function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelShock,mCapitalPanelBase,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSampleShock,mInSampleBase,tPre,varargin)
+%IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY Compute log-capital IRFs using continuous heterogeneity measures.
+%   irfResults = IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY(mCapitalPanelShock,
+%   mCapitalPanelBase,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSampleShock,
+%   mInSampleBase,tPre) calculates the impulse-response functions of the log
+%   capital stock (expressed in percentage-point deviations relative to a
+%   no-shock baseline) when heterogeneity is summarized by continuous
+%   (demeaned) leverage and distance-to-default measures. The baseline
+%   corresponds to the same economy and initial distribution simulated with
+%   the monetary shock turned off.
 %
 %   Additional name-value pair arguments:
 %       'Horizon'      - Number of post-shock quarters to report (default 12).
@@ -19,13 +19,15 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
 %   one-unit increase in the heterogeneity variable, as well as a handle to
 %   the generated figure.
 
-    narginchk(7, inf);
+    narginchk(8, inf);
 
-    panelSize = size(mInvestmentPanel);
-    if ~isequal(size(mCapitalPanel), panelSize) || ~isequal(size(mDebtPanel), panelSize) || ...
-            ~isequal(size(mCashPanel), panelSize) || ~isequal(size(mDefaultCutoffPanel), panelSize) || ...
-            ~isequal(size(mInSample), panelSize)
+    panelSize = size(mCapitalPanelShock);
+    if ~isequal(size(mCapitalPanelBase), panelSize) || ~isequal(size(mDebtPanel), panelSize) || ...
+            ~isequal(size(mCashPanel), panelSize) || ~isequal(size(mDefaultCutoffPanel), panelSize)
         error('All panel inputs must share the same dimensions.');
+    end
+    if ~isequal(size(mInSampleShock), panelSize) || ~isequal(size(mInSampleBase), panelSize)
+        error('In-sample indicators must share the same dimensions as the panels.');
     end
 
     parser = inputParser;
@@ -59,44 +61,52 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     end
 
     classificationIdx = min(tPre + 1, totalPeriods);
+    epsilon = 1e-12;
 
-    denom = max(mCapitalPanel, 1e-8);
-    investmentRate = mInvestmentPanel ./ denom;
-    investmentRate(~isfinite(investmentRate)) = NaN;
-    investmentRate(mInSample == 0) = NaN;
+    timeIndices = tPre + (0:horizon);
+    logCapitalShock = log(max(mCapitalPanelShock(:, timeIndices), epsilon));
+    logCapitalBase = log(max(mCapitalPanelBase(:, timeIndices), epsilon));
 
+    inSampleShockWindow = (mInSampleShock(:, timeIndices) == 1);
+    inSampleBaseWindow = (mInSampleBase(:, timeIndices) == 1);
+    validWindow = inSampleShockWindow & inSampleBaseWindow;
+
+    logCapitalShock(~validWindow) = NaN;
+    logCapitalBase(~validWindow) = NaN;
+
+    baselineShock = logCapitalShock(:,1);
+    baselineBase = logCapitalBase(:,1);
+
+    diffLogCapital = (logCapitalShock - baselineShock) - (logCapitalBase - baselineBase);
+
+    quarters = (0:horizon)';
+    slopeLeverage = NaN(numel(quarters),1);
+    slopeDistance = NaN(numel(quarters),1);
+    effectLeveragePerUnit = NaN(numel(quarters),1);
+    effectDistancePerUnit = NaN(numel(quarters),1);
+
+    denom = max(mCapitalPanelShock, 1e-8);
     leverageMeasure = mDebtPanel ./ denom;
     leverageMeasure(~isfinite(leverageMeasure)) = NaN;
-    leverageMeasure(mInSample == 0) = NaN;
+    leverageMeasure((mInSampleShock == 0) | (mInSampleBase == 0)) = NaN;
     leverageMean = mean(leverageMeasure, 2, 'omitnan');
     leverageDemeaned = leverageMeasure - leverageMean;
 
     distanceMeasure = mCashPanel - mDefaultCutoffPanel;
     distanceMeasure(~isfinite(distanceMeasure)) = NaN;
-    distanceMeasure(mInSample == 0) = NaN;
+    distanceMeasure((mInSampleShock == 0) | (mInSampleBase == 0)) = NaN;
     distanceMean = mean(distanceMeasure, 2, 'omitnan');
     distanceDemeaned = distanceMeasure - distanceMean;
 
     xLeverage = leverageDemeaned(:,classificationIdx);
     xDistance = distanceDemeaned(:,classificationIdx);
+    inSampleClass = (mInSampleShock(:,classificationIdx) == 1) & (mInSampleBase(:,classificationIdx) == 1);
+    xLeverage(~inSampleClass) = NaN;
+    xDistance(~inSampleClass) = NaN;
 
-    postShockIdx = tPre + (1:horizon);
-    baselinePath = mean(investmentRate(:, postShockIdx), 1, 'omitnan');
-    if any(isnan(baselinePath))
-        error('Unable to compute the aggregate baseline investment path after the shock.');
-    end
-
-    investmentDeviation = bsxfun(@minus, investmentRate(:, postShockIdx), baselinePath);
-    cumulativeDeviation = cumsum(investmentDeviation, 2);
-
-    quarters = (1:horizon)';
-    slopeLeverage = NaN(horizon,1);
-    slopeDistance = NaN(horizon,1);
-    effectLeveragePerUnit = NaN(horizon,1);
-    effectDistancePerUnit = NaN(horizon,1);
-
-    for h = 1:horizon
-        yCurrent = cumulativeDeviation(:,h);
+    for h = 0:horizon
+        colIdx = h + 1;
+        yCurrent = diffLogCapital(:,colIdx);
 
         validLeverage = ~isnan(yCurrent) & ~isnan(xLeverage);
         if any(validLeverage)
@@ -106,8 +116,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
             yL = yL - mean(yL,'omitnan');
             denomL = sum(xL.^2,'omitnan');
             if denomL > 0
-                slopeLeverage(h) = sum(xL .* yL,'omitnan') / denomL;
-                effectLeveragePerUnit(h) = slopeLeverage(h);
+                slopeLeverage(colIdx) = sum(xL .* yL,'omitnan') / denomL;
+                effectLeveragePerUnit(colIdx) = slopeLeverage(colIdx);
             end
         end
 
@@ -119,8 +129,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
             yD = yD - mean(yD,'omitnan');
             denomD = sum(xD.^2,'omitnan');
             if denomD > 0
-                slopeDistance(h) = sum(xD .* yD,'omitnan') / denomD;
-                effectDistancePerUnit(h) = slopeDistance(h);
+                slopeDistance(colIdx) = sum(xD .* yD,'omitnan') / denomD;
+                effectDistancePerUnit(colIdx) = slopeDistance(colIdx);
             end
         end
     end
@@ -146,8 +156,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada inv./capital', ...
-        '(p.p. vs. línea base, por 1 unidad)'});
+    ylabel({'Variación log capital', ...
+        '(p.p. vs. base sin shock, por 1 unidad)'});
     title('Apalancamiento (centrado por firma)');
     hold off;
 
@@ -157,8 +167,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada inv./capital', ...
-        '(p.p. vs. línea base, por 1 unidad)'});
+   ylabel({'Variación log capital', ...
+        '(p.p. vs. base sin shock, por 1 unidad)'});
     title('Distancia al default (centrada por firma)');
     hold off;
 
@@ -168,7 +178,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
     irfResults.leverage.effectPerUnit = effectLeveragePerUnit;
     irfResults.distance.slope = slopeDistance;
     irfResults.distance.effectPerUnit = effectDistancePerUnit;
-    irfResults.baselinePath = baselinePath(:);
+    irfResults.meanDifference = 100 * mean(diffLogCapital, 1, 'omitnan')';
     irfResults.figure = fig;
 
 end
