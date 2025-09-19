@@ -23,9 +23,22 @@ mShocksTransition = sParms.mShocksTransition;
 nOmega     = sParms.nOmega;
 capitalMin = sParms.capitalMin;
 
+
+% NUEVO: parámetros de restricción financiera
+    lambda0 = 5;    % λ₀: coeficiente base de apalancamiento
+    alpha   = 2;      % α: sensibilidad al riesgo soberano
+    s_t     = 0;        % riesgo soberano actual
+ % fin NUEVO
+
 % Extract candidate choices
 kPrime	= max(x(1),capitalMin + 1e-10);
 bPrime	= x(2);
+
+% NUEVO: restricción b' ≤ λ(s_t) · n_jt
+    n_j      = mCashGrid(iProd,iCash);            % patrimonio neto actual
+    lambda_s = lambda0 * exp(-alpha * s_t);       % λ(s_t)
+    c        = bPrime - lambda_s * n_j;           % obliga c ≤ 0
+% fin NUEVO
 
 %---------------------------------------------------------------
 % Compute next period's cash for different realizations of shock
@@ -56,4 +69,4 @@ debtPrice           = min(bbeta,max(0,mShocksTransition(iProd,:) * (bbeta * (1 -
 %---------------------------------------------------------------
 
 ceq		= qSS * kPrime - mCashGrid(iProd,iCash) - debtPrice * bPrime;
-c		= [];
+%c		= [];
