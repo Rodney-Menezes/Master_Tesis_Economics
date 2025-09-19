@@ -130,14 +130,14 @@ df <- df %>%
   dplyr::filter(!is.na(dlog_capital))
 
 # Shock: winsor + z-score global, luego cambio de signo
-df <- df %>%␊
-  prep_shock_var(p = 0.005) %>%␊
-  dplyr::mutate(shock_std = -shock_z) %>%   # MP>0 ≈ recorte (expansivo)␊
-  dplyr::select(-shock_win, -shock_z)    # limpiar intermedios; opcional: también -shock original␊
-␊
+df <- df %>%
+  prep_shock_var(p = 0.005) %>%
+  dplyr::mutate(shock_std = -shock_z) %>%   # MP>0 ≈ recorte (expansivo)
+  dplyr::select(-shock_win, -shock_z)    # limpiar intermedios; opcional: también -shock original
+
 # Leverage y dd: winsor + estándar global (una sola vez)
-df <- df %>%␊
-  prep_fin_vars(p = 0.005)␊
+df <- df %>%
+  prep_fin_vars(p = 0.005)
 
 # Niveles base por firma y país y dummies ex-ante (apalancamiento/distancia al default)
 firm_fin_base <- df %>%
