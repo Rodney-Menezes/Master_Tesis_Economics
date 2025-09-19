@@ -3,11 +3,11 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
 %   irfResults = IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY(mCapitalPanelShock,
 %   mCapitalPanelBase,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSampleShock,
 %   mInSampleBase,tPre) calculates the impulse-response functions of the log
-%   capital stock (expressed in percentage-point deviations relative to a
-%   no-shock baseline) when heterogeneity is summarized by continuous
+%   capital stock (expressed in percentage-point deviations relative to the
+%   shocked-economy baseline) when heterogeneity is summarized by continuous
 %   (demeaned) leverage and distance-to-default measures. The baseline
-%   corresponds to the same economy and initial distribution simulated with
-%   the monetary shock turned off.
+%   corresponds to the pre-shock period in the economy facing the monetary
+%   shock, so no counterfactual path is subtracted.
 %
 %   Additional name-value pair arguments:
 %       'Horizon'      - Number of post-shock quarters to report (default 12).
@@ -66,19 +66,16 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
 
     timeIndices = tPre + (0:horizon);
     logCapitalShock = log(max(mCapitalPanelShock(:, timeIndices), epsilon));
-    logCapitalBase = log(max(mCapitalPanelBase(:, timeIndices), epsilon));
 
     inSampleShockWindow = (mInSampleShock(:, timeIndices) == 1);
     inSampleBaseWindow = (mInSampleBase(:, timeIndices) == 1);
     validWindow = inSampleShockWindow & inSampleBaseWindow;
 
     logCapitalShock(~validWindow) = NaN;
-    logCapitalBase(~validWindow) = NaN;
 
     baselineShock = logCapitalShock(:,1);
-    baselineBase = logCapitalBase(:,1);
 
-    diffLogCapital = (logCapitalShock - baselineShock) - (logCapitalBase - baselineBase);
+    deltaLogCapital = logCapitalShock - baselineShock;
 
     quarters = (0:horizon)';
     slopeLeverage = NaN(numel(quarters),1);
@@ -110,7 +107,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
 
     for h = 0:horizon
         colIdx = h + 1;
-        yCurrent = diffLogCapital(:,colIdx);
+        yCurrent = deltaLogCapital(:,colIdx);
 
         validLeverage = ~isnan(yCurrent) & ~isnan(xLeverage);
         if any(validLeverage)
@@ -144,7 +141,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
     effectLeveragePerUnit = 100 * effectLeveragePerUnit;
     effectDistancePerUnit = 100 * effectDistancePerUnit;
 
-   effectLeveragePerStd = leverageStd .* effectLeveragePerUnit;
+    effectLeveragePerStd = leverageStd .* effectLeveragePerUnit;
     effectDistancePerStd = distanceStd .* effectDistancePerUnit;
 
     tblLeverage = table(quarters, slopeLeverage, effectLeveragePerUnit, effectLeveragePerStd, ...
@@ -164,7 +161,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
     grid on;
     xlabel('Trimestres');
     ylabel({'Variación log capital', ...
-        '(p.p. vs. base sin shock, por 1 desv. estándar)'});
+        '(p.p. vs. línea base, por 1 desv. estándar)'});
     title('Apalancamiento (centrado por firma)');
     hold off;
 
@@ -175,7 +172,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
     grid on;
     xlabel('Trimestres');
     ylabel({'Variación log capital', ...
-        '(p.p. vs. base sin shock, por 1 desv. estándar)'});
+        '(p.p. vs. línea base, por 1 desv. estándar)'});
     hold off;
 
     irfResults = struct();
@@ -188,7 +185,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
     irfResults.distance.effectPerUnit = effectDistancePerUnit;
     irfResults.distance.effectPerStd = effectDistancePerStd;
     irfResults.distance.stdAtClassification = distanceStd;
-    irfResults.meanDifference = 100 * mean(diffLogCapital, 1, 'omitnan')';
+    irfResults.meanDifference = 100 * mean(deltaLogCapital, 1, 'omitnan')';
     irfResults.figure = fig;
 
 end
