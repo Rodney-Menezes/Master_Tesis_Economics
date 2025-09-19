@@ -75,7 +75,6 @@ prep_shock_var <- function(df, p = 0.005) {
 # Winsoriza, de-mean y estandariza controles firm-level dentro de firma
 prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
   win_sym <- rlang::sym(paste0(prefix, "_win"))
-  dm_sym  <- rlang::sym(paste0(prefix, "_dm"))
   std_sym <- rlang::sym(paste0(prefix, "_std"))
   var_sym <- rlang::sym(var_in)
 
@@ -85,7 +84,6 @@ prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
       !!win_sym := winsorize(!!var_sym, p = p)
     ) %>%
     dplyr::mutate(
-      !!dm_sym  := !!win_sym - mean(!!win_sym, na.rm = TRUE),
       !!std_sym := safe_scale(!!win_sym)
     ) %>%
     dplyr::ungroup()
