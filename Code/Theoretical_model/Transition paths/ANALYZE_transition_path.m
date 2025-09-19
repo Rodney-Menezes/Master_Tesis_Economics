@@ -267,7 +267,7 @@ plot(vTime,400 * (vAggregateR_real(1:T,1) - (1 / bbeta)),'linewidth',1.5,'linest
 plot(vTime,400 * log(vAggregateInflation(1:T,1)),'linewidth',1.5,'linestyle','-.','color',[.5,.24,.5])
 plot(vTime,400 * (vAggregateR_nom(1:T,1) - (1 / bbeta)),'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
-xlim([1 10])
+xlim([1 12])
 h	 = legend('Real rate','Inflation','Nominal rate');
 set(h,'interpreter','latex','location','northeast','fontsize',14)
 set(gcf,'color','w')
@@ -283,7 +283,7 @@ plot(vTime,100 * log(vAggregateOutput(1:T,1) / aggregateOutputSS),'linewidth',1.
 plot(vTime,100 * log(vAggregateConsumption(1:T,1) / aggregateConsumptionSS),'linewidth',1.5,'linestyle','-.','color',[.5,.24,.5])
 plot(vTime,100 * log(vAggregateInvestment(1:T,1) / (aggregateInvestmentSS)),'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
-xlim([1 10])
+xlim([1 12])
 h	 = legend('Output','Consumption','Investment', 'Net inv');
 set(h,'interpreter','latex','location','northeast','fontsize',14)
 set(gcf,'color','w')
@@ -299,7 +299,7 @@ plot(vTime,100 * log(vAggregatePriceIntermediate(1:T,1) / pSS),'linewidth',1.5,'
 plot(vTime,100 * log(vAggregatePriceCapital(1:T,1)),'linewidth',1.5,'linestyle','-.','color',[.5,.24,.5])
 plot(vTime,100 * log(vAggregateWage(1:T,1) / (wageSS)),'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
-xlim([1 10])
+xlim([1 12])
 h	 = legend('Intermediate Good Price','Capital Price','Real Wage');
 set(h,'interpreter','latex','location','northeast','fontsize',14)
 set(gcf,'color','w')
@@ -399,7 +399,7 @@ hold on
 plot(vTime,400 * (vAggregateR_real(1:T,1) - (1 / bbeta)),'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
 plot(vTime,400 * (vAggregateR_real_rep_agent(1:T,1) - (1 / bbeta)),'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
-xlim([1 10])
+xlim([1 12])
 xlabel('Quarters','interpreter','latex')
 ylabel('Annualized p.p. deviation','interpreter','latex')
 h	 = legend('Het agent','Rep agent');
@@ -414,7 +414,7 @@ hold on
 plot(vTime,100 * log(vAggregateInvestment(1:T,1) / (aggregateInvestmentSS)),'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
 plot(vTime,100 * log(vAggregateInvestment_rep_agent(1:T,1) / (ddeltaHat * kRepSS)),'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
-xlim([1 10])
+xlim([1 12])
 xlabel('Quarters','interpreter','latex')
 ylabel('$\%$ deviation','interpreter','latex')
 set(gcf,'color','w')
