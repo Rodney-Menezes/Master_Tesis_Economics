@@ -3,8 +3,8 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
 %   irfResults = IMPULSE_RESPONSE_HETEROGENEITY(mInvestmentPanel, mCapitalPanel,
 %   mDebtPanel, mCashPanel, mDefaultCutoffPanel, mInSample, tPre) computes
 %   the cumulative impulse responses of investment rates (investment-to-
-%   capital) as accumulated percentage-point deviations from the steady
-%   state along two heterogeneity channels (leverage and distance-to-default)
+%   capital) as accumulated percentage-point deviations from a post-shock
+%   baseline ("línea base") along two heterogeneity channels (leverage and distance-to-default)
 %   over a default horizon of 12 quarters using the simulated panel outputs from
 %   TRANSITION_PATH_PANEL.
 %
@@ -60,7 +60,6 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     end
 
     classificationIdx = min(tPre + 1, totalPeriods);
-    baselineIdx = tPre;
 
     denom = max(mCapitalPanel, 1e-8);
     investmentRate = mInvestmentPanel ./ denom;
@@ -86,33 +85,30 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     groupCloseDefault = distanceMeasure <= distanceQuantiles(1);
     groupFarDefault = distanceMeasure >= distanceQuantiles(2);
 
-    baselineMask = (mInSample(:,baselineIdx) == 1);
-    baselineLowLeverage = mean(investmentRate(groupLowLeverage & baselineMask, baselineIdx), 'omitnan');
-    baselineHighLeverage = mean(investmentRate(groupHighLeverage & baselineMask, baselineIdx), 'omitnan');
-    baselineCloseDefault = mean(investmentRate(groupCloseDefault & baselineMask, baselineIdx), 'omitnan');
-    baselineFarDefault = mean(investmentRate(groupFarDefault & baselineMask, baselineIdx), 'omitnan');
-
-    if any(isnan([baselineLowLeverage, baselineHighLeverage, baselineCloseDefault, baselineFarDefault]))
-        error('Unable to compute baseline investment rates for one or more groups.');
-    end
-
     quarters = (1:horizon)';
     irfLeverageLow = NaN(horizon,1);
     irfLeverageHigh = NaN(horizon,1);
     irfDistanceClose = NaN(horizon,1);
     irfDistanceFar = NaN(horizon,1);
 
+    postShockIdx = tPre + (1:horizon);
+    baselinePath = mean(investmentRate(:, postShockIdx), 1, 'omitnan');
+    if any(isnan(baselinePath))
+        error('Unable to compute the aggregate baseline investment path after the shock.');
+    end
+
     for h = 1:horizon
         idx = tPre + h;
+        baselineQuarter = baselinePath(h);
         leverageLowMask = groupLowLeverage & (mInSample(:,idx) == 1);
         leverageHighMask = groupHighLeverage & (mInSample(:,idx) == 1);
         distanceCloseMask = groupCloseDefault & (mInSample(:,idx) == 1);
         distanceFarMask = groupFarDefault & (mInSample(:,idx) == 1);
 
-        irfLeverageLow(h,1) = mean(investmentRate(leverageLowMask, idx), 'omitnan') - baselineLowLeverage;
-        irfLeverageHigh(h,1) = mean(investmentRate(leverageHighMask, idx), 'omitnan') - baselineHighLeverage;
-        irfDistanceClose(h,1) = mean(investmentRate(distanceCloseMask, idx), 'omitnan') - baselineCloseDefault;
-        irfDistanceFar(h,1) = mean(investmentRate(distanceFarMask, idx), 'omitnan') - baselineFarDefault;
+        irfLeverageLow(h,1) = mean(investmentRate(leverageLowMask, idx), 'omitnan') - baselineQuarter;
+        irfLeverageHigh(h,1) = mean(investmentRate(leverageHighMask, idx), 'omitnan') - baselineQuarter;
+        irfDistanceClose(h,1) = mean(investmentRate(distanceCloseMask, idx), 'omitnan') - baselineQuarter;
+        irfDistanceFar(h,1) = mean(investmentRate(distanceFarMask, idx), 'omitnan') - baselineQuarter;
     end
 
     irfLeverageLow = cumsum(irfLeverageLow);
@@ -141,8 +137,8 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada de la tasa de inversión', ...
-        '(p.p. inv./capital vs. estado estacionario)'});
+    ylabel({'Variación acumulada inv./capital', ...
+        '(p.p. vs. línea base)'});
     title('Canal de apalancamiento');
     legend({'Bajo apalancamiento','Alto apalancamiento'},'Location','best');
     hold off;
@@ -154,8 +150,8 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada de la tasa de inversión', ...
-        '(p.p. inv./capital vs. estado estacionario)'});
+    ylabel({'Variación acumulada inv./capital', ...
+        '(p.p. vs. línea base)'});
     title('Canal distancia al default');
     legend({'Cerca del default','Lejos del default'},'Location','best');
     hold off;
