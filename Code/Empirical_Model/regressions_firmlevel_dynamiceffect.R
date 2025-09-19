@@ -44,49 +44,47 @@ safe_scale <- function(x) {
   (x - mu) / sigma
 }
 
-# Winsoriza y calcula (i) de-mean y (ii) estándar dentro de firma
+# Winsoriza y estandariza leverage y dd a nivel global
 prep_fin_vars <- function(df, p = 0.005) {
+  df <- dplyr::ungroup(df)
+
   df %>%
-    dplyr::group_by(name) %>%
     dplyr::mutate(
       leverage_win = winsorize(leverage, p = p),
-      dd_win       = winsorize(dd,       p = p),
-      # De-mean dentro de firma
-      lev_dm       = leverage_win - mean(leverage_win, na.rm = TRUE),
-      dd_dm        = dd_win       - mean(dd_win,       na.rm = TRUE),
-      # Estandarización dentro de firma (comparabilidad entre gráficos)
-      lev_std      = safe_scale(leverage_win),
-      dd_std       = safe_scale(dd_win)
+      dd_win       = winsorize(dd,       p = p)
     ) %>%
-    dplyr::ungroup()
+    dplyr::mutate(
+      lev_std = safe_scale(leverage_win),
+      dd_std  = safe_scale(dd_win)
+    )
 }
 
-# Winsoriza y estandariza el shock monetario por país (z-score)
+# Winsoriza y estandariza el shock monetario a nivel global (z-score)
 prep_shock_var <- function(df, p = 0.005) {
+  df <- dplyr::ungroup(df)
+
   df %>%
-    dplyr::group_by(Country) %>%
     dplyr::mutate(
       shock_win = winsorize(shock, p = p),
-      shock_z   = safe_scale(shock_win)   # z-score por país
-    ) %>%
-    dplyr::ungroup()
+      shock_z   = safe_scale(shock_win)   # z-score global
+    )
 }
 
-# Winsoriza, de-mean y estandariza controles firm-level dentro de firma
+# Winsoriza y estandariza controles firm-level a nivel global
 prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
+  df <- dplyr::ungroup(df)
+
   win_sym <- rlang::sym(paste0(prefix, "_win"))
   std_sym <- rlang::sym(paste0(prefix, "_std"))
   var_sym <- rlang::sym(var_in)
 
   df %>%
-    dplyr::group_by(name) %>%
     dplyr::mutate(
       !!win_sym := winsorize(!!var_sym, p = p)
     ) %>%
     dplyr::mutate(
       !!std_sym := safe_scale(!!win_sym)
-    ) %>%
-    dplyr::ungroup()
+    )
 }
 
 # Crea rezagos (por defecto, un periodo) de los controles firm-level dentro de firma
@@ -131,15 +129,15 @@ df <- df %>%
   dplyr::select(-ratio_cap) %>%
   dplyr::filter(!is.na(dlog_capital))
 
-# Shock: winsor + z-score por país, luego cambio de signo
-df <- df %>%
-  prep_shock_var(p = 0.005) %>%
-  dplyr::mutate(shock_std = -shock_z) %>%   # MP>0 ≈ recorte (expansivo)
-  dplyr::select(-shock_win, -shock_z)    # limpiar intermedios; opcional: también -shock original
-
-# Leverage y dd: winsor + de-mean + estándar dentro de firma (una sola vez)
-df <- df %>%
-  prep_fin_vars(p = 0.005)
+# Shock: winsor + z-score global, luego cambio de signo
+df <- df %>%␊
+  prep_shock_var(p = 0.005) %>%␊
+  dplyr::mutate(shock_std = -shock_z) %>%   # MP>0 ≈ recorte (expansivo)␊
+  dplyr::select(-shock_win, -shock_z)    # limpiar intermedios; opcional: también -shock original␊
+␊
+# Leverage y dd: winsor + estándar global (una sola vez)
+df <- df %>%␊
+  prep_fin_vars(p = 0.005)␊
 
 # Niveles base por firma y país y dummies ex-ante (apalancamiento/distancia al default)
 firm_fin_base <- df %>%
@@ -506,7 +504,7 @@ print(p_avg)
 
 
 # 1) Preprocesar y crear dlog_capital y Ldl_capital
-# --------------------------------------
+# ---------------------------------------------------
 
 if (!"Ldl_capital" %in% names(df)) {
   df <- df %>%
@@ -516,8 +514,8 @@ if (!"Ldl_capital" %in% names(df)) {
     ungroup()
 }
 
-# 2) Winsorizar y diazotizar leverage y dd dentro de firma
-# ------------------------------------------------------
+# 2) Winsorizar y estandarizar leverage y dd a nivel global
+# ----------------------------------------------------------
 df <- prep_fin_vars(df)
 
 # 3) Interacciones con shock y con dlog_gdp (si existe)
@@ -742,12 +740,9 @@ df_cntl <- df_cntl %>%
   prep_ctrl_var(var_in = "rsales_g", prefix = "rsales_g", p = 0.005) %>%
   prep_ctrl_var(var_in = "current_ratio", prefix = "sh_current_a", p = 0.005) %>%
   add_lagged_controls(c("rsales_g_std", "size_raw", "sh_current_a_std")) %>%
-  dplyr::group_by(name) %>%
-  dplyr::arrange(dateq, .by_group = TRUE) %>%
   dplyr::mutate(
     size_win = winsorize(size_raw)
   ) %>%
-  dplyr::ungroup() %>%
   dplyr::select(-size_raw) %>%
   prep_fin_vars()
 
@@ -856,15 +851,12 @@ df_cntl13 <- df
 # 1) Calcular tamaño raw y winsorización
 # ---------------------------------------
 df_cntl13 <- df_cntl13 %>%
-  group_by(name) %>%
-  arrange(dateq) %>%
-  mutate(
+  dplyr::mutate(
     # tamaño proxy bruto sin estandarizar
     size_raw = (log(atq) + log (saleq)) / 2,
     size_win = winsorize(size_raw)
   ) %>%
-  ungroup() %>%
-  select(-size_raw) %>%
+  dplyr::select(-size_raw) %>%
   prep_fin_vars()
 
 # 2) rear interacciones con shock y dlog_gdp
