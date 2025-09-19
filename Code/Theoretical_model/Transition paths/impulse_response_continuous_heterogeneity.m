@@ -2,9 +2,10 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
 %IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY Compute IRFs using continuous heterogeneity measures.
 %   irfResults = IMPULSE_RESPONSE_CONTINUOUS_HETEROGENEITY(mInvestmentPanel,
 %   mCapitalPanel,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSample,tPre)
-%   calculates impulse-response functions of investment rates when
-%   heterogeneity is summarized by continuous (demeaned) leverage and
-%   distance-to-default measures rather than discrete quantile groups.
+%   calculates the cumulative impulse-response functions of investment
+%   rates (investment-to-capital) when heterogeneity is summarized by
+%   continuous (demeaned) leverage and distance-to-default measures rather
+%   than discrete quantile groups.
 %
 %   Additional name-value pair arguments:
 %       'Horizon'      - Number of post-shock quarters to report (default 12).
@@ -13,8 +14,8 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
 %
 %   The function returns a structure with the computed impulse responses,
 %   including the regression slope coefficients and the implied effect of a
-%   one-standard-deviation increase in the heterogeneity variable, as well
-%   as a handle to the generated figure.
+%   one-unit increase in the heterogeneity variable, as well as a handle to
+%   the generated figure.
 
     narginchk(7, inf);
 
@@ -84,55 +85,55 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
         error('Unable to compute the aggregate baseline investment rate.');
     end
 
+    postShockIdx = tPre + (1:horizon);
+    investmentDeviation = investmentRate(:, postShockIdx) - baselineMean;
+    cumulativeDeviation = cumsum(investmentDeviation, 2);
+
     quarters = (1:horizon)';
     slopeLeverage = NaN(horizon,1);
     slopeDistance = NaN(horizon,1);
-    effectLeverageOneSD = NaN(horizon,1);
-    effectDistanceOneSD = NaN(horizon,1);
+    effectLeveragePerUnit = NaN(horizon,1);
+    effectDistancePerUnit = NaN(horizon,1);
 
     for h = 1:horizon
-        idx = tPre + h;
-
-        yCurrent = investmentRate(:,idx);
+        yCurrent = cumulativeDeviation(:,h);
 
         validLeverage = ~isnan(yCurrent) & ~isnan(xLeverage);
         if any(validLeverage)
-            yL = yCurrent(validLeverage) - baselineMean;
+            yL = yCurrent(validLeverage);
             xL = xLeverage(validLeverage);
             xL = xL - mean(xL,'omitnan');
             yL = yL - mean(yL,'omitnan');
             denomL = sum(xL.^2,'omitnan');
             if denomL > 0
                 slopeLeverage(h) = sum(xL .* yL,'omitnan') / denomL;
-                sigmaXL = std(xLeverage(validLeverage), 'omitnan');
-                effectLeverageOneSD(h) = slopeLeverage(h) * sigmaXL;
+                effectLeveragePerUnit(h) = slopeLeverage(h);
             end
         end
 
         validDistance = ~isnan(yCurrent) & ~isnan(xDistance);
         if any(validDistance)
-            yD = yCurrent(validDistance) - baselineMean;
+            yD = yCurrent(validDistance);
             xD = xDistance(validDistance);
             xD = xD - mean(xD,'omitnan');
             yD = yD - mean(yD,'omitnan');
             denomD = sum(xD.^2,'omitnan');
             if denomD > 0
                 slopeDistance(h) = sum(xD .* yD,'omitnan') / denomD;
-                sigmaXD = std(xDistance(validDistance), 'omitnan');
-                effectDistanceOneSD(h) = slopeDistance(h) * sigmaXD;
+                effectDistancePerUnit(h) = slopeDistance(h);
             end
         end
     end
 
     slopeLeverage = 100 * slopeLeverage;
     slopeDistance = 100 * slopeDistance;
-    effectLeverageOneSD = 100 * effectLeverageOneSD;
-    effectDistanceOneSD = 100 * effectDistanceOneSD;
+    effectLeveragePerUnit = 100 * effectLeveragePerUnit;
+    effectDistancePerUnit = 100 * effectDistancePerUnit;
 
-    tblLeverage = table(quarters, slopeLeverage, effectLeverageOneSD, ...
-        'VariableNames', {'Quarter','Slope','EffectOneSD'});
-    tblDistance = table(quarters, slopeDistance, effectDistanceOneSD, ...
-        'VariableNames', {'Quarter','Slope','EffectOneSD'});
+    tblLeverage = table(quarters, slopeLeverage, effectLeveragePerUnit, ...
+        'VariableNames', {'Quarter','Slope','EffectPerUnit'});
+    tblDistance = table(quarters, slopeDistance, effectDistancePerUnit, ...
+        'VariableNames', {'Quarter','Slope','EffectPerUnit'});
 
     writetable(tblLeverage, fullfile(resultsDir, 'IRF_Leverage_continuous.xlsx'));
     writetable(tblDistance, fullfile(resultsDir, 'IRF_dd_continuous.xlsx'));
@@ -141,7 +142,7 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
 
     subplot(1,2,1);
     hold on;
-    plot(quarters, effectLeverageOneSD, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.0 0.45 0.74]);
+    plot(quarters, effectLeveragePerUnit, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.0 0.45 0.74]);
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
@@ -151,20 +152,20 @@ function irfResults = impulse_response_continuous_heterogeneity(mInvestmentPanel
 
     subplot(1,2,2);
     hold on;
-    plot(quarters, effectDistanceOneSD, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.85 0.33 0.10]);
+    plot(quarters, effectDistancePerUnit, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.85 0.33 0.10]);
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel('p.p. (1 s.d. sobre la media)');
+    ylabel('p.p. acumulados (por 1 unidad)');
     title('Distancia al default (centrada por firma)');
     hold off;
 
     irfResults = struct();
     irfResults.quarters = quarters;
     irfResults.leverage.slope = slopeLeverage;
-    irfResults.leverage.effectOneSD = effectLeverageOneSD;
+    irfResults.leverage.effectPerUnit = effectLeveragePerUnit;
     irfResults.distance.slope = slopeDistance;
-    irfResults.distance.effectOneSD = effectDistanceOneSD;
+    irfResults.distance.effectPerUnit = effectDistancePerUnit;
     irfResults.figure = fig;
 
 end
