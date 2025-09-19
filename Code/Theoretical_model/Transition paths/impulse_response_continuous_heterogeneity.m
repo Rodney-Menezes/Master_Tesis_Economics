@@ -15,9 +15,10 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
 %                        (default ../Results relative to this file).
 %
 %   The function returns a structure with the computed impulse responses,
-%   including the regression slope coefficients and the implied effect of a
-%   one-unit increase in the heterogeneity variable, as well as a handle to
-%   the generated figure.
+%   including the regression slope coefficients, the implied effect of a
+%   one-unit increase in the heterogeneity variable, and the effect of a
+%   one-standard-deviation increase (using the cross-sectional dispersion at
+%   the classification period), as well as a handle to the generated figure.
 
     narginchk(8, inf);
 
@@ -104,6 +105,9 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
     xLeverage(~inSampleClass) = NaN;
     xDistance(~inSampleClass) = NaN;
 
+    leverageStd = std(xLeverage,'omitnan');
+    distanceStd = std(xDistance,'omitnan');
+
     for h = 0:horizon
         colIdx = h + 1;
         yCurrent = diffLogCapital(:,colIdx);
@@ -140,10 +144,13 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
     effectLeveragePerUnit = 100 * effectLeveragePerUnit;
     effectDistancePerUnit = 100 * effectDistancePerUnit;
 
-    tblLeverage = table(quarters, slopeLeverage, effectLeveragePerUnit, ...
-        'VariableNames', {'Quarter','Slope','EffectPerUnit'});
-    tblDistance = table(quarters, slopeDistance, effectDistancePerUnit, ...
-        'VariableNames', {'Quarter','Slope','EffectPerUnit'});
+   effectLeveragePerStd = leverageStd .* effectLeveragePerUnit;
+    effectDistancePerStd = distanceStd .* effectDistancePerUnit;
+
+    tblLeverage = table(quarters, slopeLeverage, effectLeveragePerUnit, effectLeveragePerStd, ...
+        'VariableNames', {'Quarter','Slope','EffectPerUnit','EffectPerStd'});
+    tblDistance = table(quarters, slopeDistance, effectDistancePerUnit, effectDistancePerStd, ...
+        'VariableNames', {'Quarter','Slope','EffectPerUnit','EffectPerStd'});
 
     writetable(tblLeverage, fullfile(resultsDir, 'IRF_Leverage_continuous.xlsx'));
     writetable(tblDistance, fullfile(resultsDir, 'IRF_dd_continuous.xlsx'));
@@ -152,24 +159,23 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
 
     subplot(1,2,1);
     hold on;
-    plot(quarters, effectLeveragePerUnit, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.0 0.45 0.74]);
+    plot(quarters, effectLeveragePerStd, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.0 0.45 0.74]);
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
     ylabel({'Variación log capital', ...
-        '(p.p. vs. base sin shock, por 1 unidad)'});
+        '(p.p. vs. base sin shock, por 1 desv. estándar)'});
     title('Apalancamiento (centrado por firma)');
     hold off;
 
     subplot(1,2,2);
     hold on;
-    plot(quarters, effectDistancePerUnit, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.85 0.33 0.10]);
+    plot(quarters, effectDistancePerStd, 'LineWidth', 1.5, 'LineStyle', '-', 'Color', [0.85 0.33 0.10]);
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-   ylabel({'Variación log capital', ...
-        '(p.p. vs. base sin shock, por 1 unidad)'});
-    title('Distancia al default (centrada por firma)');
+    ylabel({'Variación log capital', ...
+        '(p.p. vs. base sin shock, por 1 desv. estándar)'});
     hold off;
 
     irfResults = struct();
@@ -177,7 +183,11 @@ function irfResults = impulse_response_continuous_heterogeneity(mCapitalPanelSho
     irfResults.leverage.slope = slopeLeverage;
     irfResults.leverage.effectPerUnit = effectLeveragePerUnit;
     irfResults.distance.slope = slopeDistance;
+    irfResults.leverage.effectPerStd = effectLeveragePerStd;
+    irfResults.leverage.stdAtClassification = leverageStd;
     irfResults.distance.effectPerUnit = effectDistancePerUnit;
+    irfResults.distance.effectPerStd = effectDistancePerStd;
+    irfResults.distance.stdAtClassification = distanceStd;
     irfResults.meanDifference = 100 * mean(diffLogCapital, 1, 'omitnan')';
     irfResults.figure = fig;
 
