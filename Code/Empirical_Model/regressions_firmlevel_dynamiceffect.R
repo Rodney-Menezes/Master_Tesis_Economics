@@ -261,13 +261,45 @@ res_dd_nocy <- map(0:12, function(h) {
 # 6) Extraer coeficientes y errores estándar
 dyn_lev_nocy <- tibble(
   horizon = 0:12,
-  beta    = map_dbl(res_lev_nocy, ~ coef(.x)["lev_shock"]),
-  se      = map_dbl(res_lev_nocy, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
+  beta    = map_dbl(res_lev_nocy, ~ {
+    coefs <- coef(.x)
+    if ("lev_shock" %in% names(coefs)) {
+      coefs[["lev_shock"]]
+    } else {
+      NA_real_
+    }
+  }),
+  se      = map_dbl(res_lev_nocy, ~ {
+    vc <- tryCatch(vcov(.x), error = function(e) NULL)
+    if (!is.null(vc) &&
+        "lev_shock" %in% rownames(vc) &&
+        "lev_shock" %in% colnames(vc)) {
+      sqrt(vc["lev_shock", "lev_shock"])
+    } else {
+      NA_real_
+    }
+  })
 )
 dyn_dd_nocy <- tibble(
   horizon = 0:12,
-  beta    = map_dbl(res_dd_nocy, ~ coef(.x)["d2d_shock"]),
-  se      = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
+  beta    = map_dbl(res_dd_nocy, ~ {
+    coefs <- coef(.x)
+    if ("d2d_shock" %in% names(coefs)) {
+      coefs[["d2d_shock"]]
+    } else {
+      NA_real_
+    }
+  }),
+  se      = map_dbl(res_dd_nocy, ~ {
+    vc <- tryCatch(vcov(.x), error = function(e) NULL)
+    if (!is.null(vc) &&
+        "d2d_shock" %in% rownames(vc) &&
+        "d2d_shock" %in% colnames(vc)) {
+      sqrt(vc["d2d_shock", "d2d_shock"])
+    } else {
+      NA_real_
+    }
+  })
 )
 
 # 7) Graficar Figura 1
