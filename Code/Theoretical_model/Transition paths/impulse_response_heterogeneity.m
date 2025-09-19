@@ -1,13 +1,16 @@
-function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPanel,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSample,tPre,varargin)
-%IMPULSE_RESPONSE_HETEROGENEITY Compute IRFs for leverage and default-distance heterogeneity.
-%   irfResults = IMPULSE_RESPONSE_HETEROGENEITY(mInvestmentPanel, mCapitalPanel,
-%   mDebtPanel, mCashPanel, mDefaultCutoffPanel, mInSample, tPre) computes
-%   the cumulative impulse responses of investment rates (investment-to-
-%   capital) as accumulated percentage-point deviations from a post-shock
-%   baseline ("línea base") along two heterogeneity channels (leverage and distance-to-default)
-%   over a default horizon of 12 quarters using the simulated panel outputs from
-%   TRANSITION_PATH_PANEL.
-%
+function irfResults = impulse_response_heterogeneity(mCapitalPanelShock,mCapitalPanelBase,mDebtPanel,mCashPanel,mDefaultCutoffPanel,mInSampleShock,mInSampleBase,tPre,varargin)
+%IMPULSE_RESPONSE_HETEROGENEITY Compute log-capital IRFs for leverage and default-distance heterogeneity.
+%   irfResults = IMPULSE_RESPONSE_HETEROGENEITY(mCapitalPanelShock, mCapitalPanelBase,
+%   mDebtPanel, mCashPanel, mDefaultCutoffPanel, mInSampleShock, mInSampleBase, tPre)
+%   computes impulse-response functions for the log capital stock (expressed
+%   in percentage-point deviations relative to a no-shock baseline) along two
+%   heterogeneity channels (leverage and distance-to-default). The baseline
+%   corresponds to the same economy and initial distribution simulated with
+%   the monetary shock turned off. The function reports the response for a
+%   horizon of up to 12 quarters (or as many quarters as are available) and
+%   returns both the series for each heterogeneity group and a handle to the
+%   generated figure.
+%%
 %   Additional name-value pair arguments:
 %       'Horizon'      - Number of post-shock quarters to report (default 12).
 %       'ResultsDir'   - Directory where Excel outputs are stored
@@ -18,13 +21,15 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
 %   The function returns a structure with the computed impulse responses
 %   and a handle to the generated figure.
 
-    narginchk(7, inf);
+    narginchk(8, inf);
 
-    panelSize = size(mInvestmentPanel);
-    if ~isequal(size(mCapitalPanel), panelSize) || ~isequal(size(mDebtPanel), panelSize) || ...
-            ~isequal(size(mCashPanel), panelSize) || ~isequal(size(mDefaultCutoffPanel), panelSize) || ...
-            ~isequal(size(mInSample), panelSize)
+    panelSize = size(mCapitalPanelShock);
+    if ~isequal(size(mCapitalPanelBase), panelSize) || ~isequal(size(mDebtPanel), panelSize) || ...
+            ~isequal(size(mCashPanel), panelSize) || ~isequal(size(mDefaultCutoffPanel), panelSize)
         error('All panel inputs must share the same dimensions.');
+    end
+    if ~isequal(size(mInSampleShock), panelSize) || ~isequal(size(mInSampleBase), panelSize)
+        error('In-sample indicators must share the same dimensions as the panels.');
     end
 
     parser = inputParser;
@@ -60,61 +65,78 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     end
 
     classificationIdx = min(tPre + 1, totalPeriods);
+    epsilon = 1e-12;
 
-    denom = max(mCapitalPanel, 1e-8);
-    investmentRate = mInvestmentPanel ./ denom;
-    investmentRate(~isfinite(investmentRate)) = NaN;
-    investmentRate(mInSample == 0) = NaN;
+    timeIndices = tPre + (0:horizon);
+    logCapitalShock = log(max(mCapitalPanelShock(:, timeIndices), epsilon));
+    logCapitalBase = log(max(mCapitalPanelBase(:, timeIndices), epsilon));
 
-    validLeverage = (mInSample(:,classificationIdx) == 1) & isfinite(investmentRate(:,classificationIdx));
+    inSampleShockWindow = (mInSampleShock(:, timeIndices) == 1);
+    inSampleBaseWindow = (mInSampleBase(:, timeIndices) == 1);
+    validWindow = inSampleShockWindow & inSampleBaseWindow;
+
+    logCapitalShock(~validWindow) = NaN;
+    logCapitalBase(~validWindow) = NaN;
+
+    baselineShock = logCapitalShock(:,1);
+    baselineBase = logCapitalBase(:,1);
+
+    deltaShock = logCapitalShock - baselineShock;
+    deltaBase = logCapitalBase - baselineBase;
+    diffLogCapital = deltaShock - deltaBase;
+
+    quarters = (0:horizon)';
+    irfLeverageLow = NaN(numel(quarters),1);
+    irfLeverageHigh = NaN(numel(quarters),1);
+    irfDistanceClose = NaN(numel(quarters),1);
+    irfDistanceFar = NaN(numel(quarters),1);
+
+    validLeverage = (mInSampleShock(:,classificationIdx) == 1) & (mInSampleBase(:,classificationIdx) == 1);
+    validLeverage = validLeverage & isfinite(mDebtPanel(:,classificationIdx)) & (mCapitalPanelShock(:,classificationIdx) > 0);
     if ~any(validLeverage)
         error('No valid observations to compute leverage groups at the classification period.');
     end
-    leverageMeasure = mDebtPanel(:,classificationIdx) ./ max(mCapitalPanel(:,classificationIdx),1e-8);
+    leverageMeasure = mDebtPanel(:,classificationIdx) ./ max(mCapitalPanelShock(:,classificationIdx),1e-8);
     leverageMeasure(~validLeverage) = NaN;
     leverageQuantiles = quantile(leverageMeasure(validLeverage), quantiles);
     groupLowLeverage = leverageMeasure <= leverageQuantiles(1);
     groupHighLeverage = leverageMeasure >= leverageQuantiles(2);
+    groupLowLeverage(~validLeverage) = false;
+    groupHighLeverage(~validLeverage) = false;
 
     distanceMeasure = mCashPanel(:,classificationIdx) - mDefaultCutoffPanel(:,classificationIdx);
-    validDistance = (mInSample(:,classificationIdx) == 1) & ~isnan(distanceMeasure);
+    validDistance = (mInSampleShock(:,classificationIdx) == 1) & (mInSampleBase(:,classificationIdx) == 1) & ~isnan(distanceMeasure);
     if ~any(validDistance)
         error('No valid observations to compute distance-to-default groups at the classification period.');
     end
     distanceQuantiles = quantile(distanceMeasure(validDistance), quantiles);
     groupCloseDefault = distanceMeasure <= distanceQuantiles(1);
     groupFarDefault = distanceMeasure >= distanceQuantiles(2);
+    groupCloseDefault(~validDistance) = false;
+    groupFarDefault(~validDistance) = false;
 
-    quarters = (1:horizon)';
-    irfLeverageLow = NaN(horizon,1);
-    irfLeverageHigh = NaN(horizon,1);
-    irfDistanceClose = NaN(horizon,1);
-    irfDistanceFar = NaN(horizon,1);
+    for h = 0:horizon
+        colIdx = h + 1;
+        timeIdx = tPre + h;
 
-    postShockIdx = tPre + (1:horizon);
-    baselinePath = mean(investmentRate(:, postShockIdx), 1, 'omitnan');
-    if any(isnan(baselinePath))
-        error('Unable to compute the aggregate baseline investment path after the shock.');
+        leverageLowMask = groupLowLeverage & (mInSampleShock(:,timeIdx) == 1) & (mInSampleBase(:,timeIdx) == 1);
+        leverageHighMask = groupHighLeverage & (mInSampleShock(:,timeIdx) == 1) & (mInSampleBase(:,timeIdx) == 1);
+        distanceCloseMask = groupCloseDefault & (mInSampleShock(:,timeIdx) == 1) & (mInSampleBase(:,timeIdx) == 1);
+        distanceFarMask = groupFarDefault & (mInSampleShock(:,timeIdx) == 1) & (mInSampleBase(:,timeIdx) == 1);
+
+        if any(leverageLowMask)
+            irfLeverageLow(colIdx,1) = mean(diffLogCapital(leverageLowMask, colIdx), 'omitnan');
+        end
+        if any(leverageHighMask)
+            irfLeverageHigh(colIdx,1) = mean(diffLogCapital(leverageHighMask, colIdx), 'omitnan');
+        end
+        if any(distanceCloseMask)
+            irfDistanceClose(colIdx,1) = mean(diffLogCapital(distanceCloseMask, colIdx), 'omitnan');
+        end
+        if any(distanceFarMask)
+            irfDistanceFar(colIdx,1) = mean(diffLogCapital(distanceFarMask, colIdx), 'omitnan');
+        end
     end
-
-    for h = 1:horizon
-        idx = tPre + h;
-        baselineQuarter = baselinePath(h);
-        leverageLowMask = groupLowLeverage & (mInSample(:,idx) == 1);
-        leverageHighMask = groupHighLeverage & (mInSample(:,idx) == 1);
-        distanceCloseMask = groupCloseDefault & (mInSample(:,idx) == 1);
-        distanceFarMask = groupFarDefault & (mInSample(:,idx) == 1);
-
-        irfLeverageLow(h,1) = mean(investmentRate(leverageLowMask, idx), 'omitnan') - baselineQuarter;
-        irfLeverageHigh(h,1) = mean(investmentRate(leverageHighMask, idx), 'omitnan') - baselineQuarter;
-        irfDistanceClose(h,1) = mean(investmentRate(distanceCloseMask, idx), 'omitnan') - baselineQuarter;
-        irfDistanceFar(h,1) = mean(investmentRate(distanceFarMask, idx), 'omitnan') - baselineQuarter;
-    end
-
-    irfLeverageLow = cumsum(irfLeverageLow);
-    irfLeverageHigh = cumsum(irfLeverageHigh);
-    irfDistanceClose = cumsum(irfDistanceClose);
-    irfDistanceFar = cumsum(irfDistanceFar);
 
     irfLeverageLow = 100 * irfLeverageLow;
     irfLeverageHigh = 100 * irfLeverageHigh;
@@ -122,9 +144,9 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     irfDistanceFar = 100 * irfDistanceFar;
 
     tblLeverage = table(quarters, irfLeverageLow, irfLeverageHigh, ...
-        'VariableNames', {'Quarter','BajoApalancamientoAcum','AltoApalancamientoAcum'});
+        'VariableNames', {'Quarter','BajoApalancamientoLogK','AltoApalancamientoLogK'});
     tblDistance = table(quarters, irfDistanceClose, irfDistanceFar, ...
-        'VariableNames', {'Quarter','CercaDefaultAcum','LejosDefaultAcum'});
+        'VariableNames', {'Quarter','CercaDefaultLogK','LejosDefaultLogK'});
 
     writetable(tblLeverage, fullfile(resultsDir, 'IRF_Leverage.xlsx'));
     writetable(tblDistance, fullfile(resultsDir, 'IRF_dd.xlsx'));
@@ -137,8 +159,8 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada inv./capital', ...
-        '(p.p. vs. línea base)'});
+    yylabel({'Variación log capital', ...
+        '(p.p. vs. base sin shock)'});
     title('Canal de apalancamiento');
     legend({'Bajo apalancamiento','Alto apalancamiento'},'Location','best');
     hold off;
@@ -150,8 +172,8 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel({'Variación acumulada inv./capital', ...
-        '(p.p. vs. línea base)'});
+    ylabel({'Variación log capital', ...
+        '(p.p. vs. base sin shock)'});
     title('Canal distancia al default');
     legend({'Cerca del default','Lejos del default'},'Location','best');
     hold off;
@@ -162,6 +184,7 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     irfResults.leverage.high = irfLeverageHigh;
     irfResults.distance.close = irfDistanceClose;
     irfResults.distance.far = irfDistanceFar;
+    irfResults.meanDifference = 100 * mean(diffLogCapital, 1, 'omitnan')';
     irfResults.figure = fig;
     irfResults.resultsDir = resultsDir;
     irfResults.quantiles = quantiles;
