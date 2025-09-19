@@ -27,7 +27,7 @@ library(kableExtra)
 
 
 # =========================
-# Helpers (winsor/standard)
+# Helpers (winsor/de-mean)
 # =========================
 winsorize <- function(x, p = 0.005) {
   lo <- stats::quantile(x, p, na.rm = TRUE)
@@ -35,16 +35,7 @@ winsorize <- function(x, p = 0.005) {
   pmin(pmax(x, lo), hi)
 }
 
-safe_scale <- function(x) {
-  mu <- mean(x, na.rm = TRUE)
-  sigma <- sd(x, na.rm = TRUE)
-  if (!is.finite(sigma) || sigma == 0) {
-    return(ifelse(is.na(x), NA_real_, 0))
-  }
-  (x - mu) / sigma
-}
-
-# Winsoriza y estandariza leverage y dd a nivel país
+# Winsoriza y de-media leverage y dd a nivel país/firma
 prep_fin_vars <- function(df, p = 0.005) {
   df <- dplyr::ungroup(df)
 
@@ -52,21 +43,21 @@ prep_fin_vars <- function(df, p = 0.005) {
     dplyr::group_by(Country) %>%
     dplyr::mutate(
       leverage_win = winsorize(leverage, p = p),
-      dd_win       = winsorize(dd,       p = p),
-      lev_std      = safe_scale(leverage_win),
-      dd_std       = safe_scale(dd_win)
+      dd_win       = winsorize(dd,       p = p)
     ) %>%
     dplyr::ungroup() %>%
     dplyr::group_by(name) %>%
     dplyr::arrange(dateq, .by_group = TRUE) %>%
     dplyr::mutate(
-      L1_lev_std = dplyr::lag(lev_std, 1),
-      L1_dd_std  = dplyr::lag(dd_std,  1)
+      lev_dm   = leverage_win - mean(leverage_win, na.rm = TRUE),
+      dd_dm    = dd_win       - mean(dd_win,       na.rm = TRUE),
+      L1_lev_dm = dplyr::lag(lev_dm, 1),
+      L1_dd_dm  = dplyr::lag(dd_dm,  1)
     ) %>%
     dplyr::ungroup()
 }
 
-# Winsoriza y estandariza el shock monetario a nivel país (z-score)
+# Winsoriza el shock monetario a nivel país y ajusta el signo expansivo
 prep_shock_var <- function(df, p = 0.005) {
   df <- dplyr::ungroup(df)
 
@@ -74,24 +65,22 @@ prep_shock_var <- function(df, p = 0.005) {
     dplyr::group_by(Country) %>%
     dplyr::mutate(
       shock_win = winsorize(shock, p = p),
-      shock_z   = safe_scale(shock_win)   # z-score por país
+      shock_exp = -shock_win
     ) %>%
     dplyr::ungroup()
 }
 
-# Winsoriza y estandariza controles firm-level a nivel país
-prep_ctrl_var <- function(df, var_in, prefix, p = 0.005) {
+# Winsoriza controles firm-level a nivel país
+prep_ctrl_var <- function(df, var_in, prefix = var_in, p = 0.005) {
   df <- dplyr::ungroup(df)
 
   win_sym <- rlang::sym(paste0(prefix, "_win"))
-  std_sym <- rlang::sym(paste0(prefix, "_std"))
   var_sym <- rlang::sym(var_in)
 
   df %>%
     dplyr::group_by(Country) %>%
     dplyr::mutate(
-      !!win_sym := winsorize(!!var_sym, p = p),
-      !!std_sym := safe_scale(!!win_sym)
+      !!win_sym := winsorize(!!var_sym, p = p)
     ) %>%
     dplyr::ungroup()
 }
@@ -138,13 +127,11 @@ df <- df %>%
   dplyr::select(-ratio_cap) %>%
   dplyr::filter(!is.na(dlog_capital))
 
-# Shock: winsor + z-score global, luego cambio de signo
+# Shock: winsor por país y signo expansivo (>0)
 df <- df %>%
-  prep_shock_var(p = 0.005) %>%
-  dplyr::mutate(shock_std = -shock_z) %>%   # MP>0 ≈ recorte (expansivo)
-  dplyr::select(-shock_win, -shock_z)    # limpiar intermedios; opcional: también -shock original
+  prep_shock_var(p = 0.005)
 
-# Leverage y dd: winsor + estándar global (una sola vez)
+# Leverage y dd: winsor + de-mean intra-firma (una sola vez)
 df <- df %>%
   prep_fin_vars(p = 0.005)
 
@@ -182,7 +169,7 @@ df <- df %>%
 # Parte 1: Sin controles cíclicos
 # =================================================================
 
-# 1) Controles firm-level y estandarización de ventas, tamaño y liquidez
+# 1) Controles firm-level winsorizados y rezagados
 df <- df %>%
   dplyr::group_by(name) %>%
   dplyr::arrange(dateq, .by_group = TRUE) %>%
@@ -205,17 +192,17 @@ if (!"size_raw" %in% names(df)) {
 }
 
 df <- df %>%
-  prep_ctrl_var(var_in = "current_ratio", prefix = "sh_current_a", p = 0.005)
+  prep_ctrl_var(var_in = "current_ratio", prefix = "current_ratio", p = 0.005)
 
 df <- df %>%
-  add_lagged_controls(c("rsales_g_std", "size_raw", "sh_current_a_std"))
+  add_lagged_controls(c("rsales_g_win", "size_raw", "current_ratio_win"))
 
-# 2) Crear interacciones “raw” (winsorizadas) con el shock
-df <- df %>%␊
-mutate(␊
-  lev_shock = L1_lev_std * shock_std,
-  d2d_shock = L1_dd_std  * shock_std
-)␊
+# 2) Crear interacciones winsorizadas con el shock expansivo
+df <- df %>%
+  dplyr::mutate(
+    lev_shock = L1_lev_dm * shock_exp,
+    d2d_shock = L1_dd_dm  * shock_exp
+  )
 
 # 3) Construir cumFh_dlog_capital para h = 0…12
 # --------------------------------------------------------
@@ -238,7 +225,7 @@ if (!all(vars_cap %in% names(df))) {
 }
 
 # 4) Definir controles y cadena de regresores
-controls_firm   <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
+controls_firm   <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
 controls_macro  <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn_nocy))
 controls_vec_nocy <- c(controls_firm, controls_macro)
 all_controls_nocy <- paste(controls_vec_nocy, collapse = " + ")
@@ -288,7 +275,7 @@ p_lev_nocy <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
   labs(
     title    = "Panel (a): Heterogeneidad por apalancamiento",
     x        = "Trimestres",
-    y        = "Efecto acumulado de inversión"
+    y        = "Efecto acumulado en Δlog(K)"
   ) +
   theme_minimal()
 
@@ -302,7 +289,7 @@ p_dd_nocy <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
   labs(
     title    = "Panel (b): Heterogeneidad por distancia al default",
     x        = "Trimestres",
-    y        = "Efecto acumulado de inversión"
+    y        = "Efecto acumulado en Δlog(K)"
   ) +
   theme_minimal()
 
@@ -320,7 +307,7 @@ print(figure1)
 estimate_lp_subset <- function(data_in) {
   purrr::map(0:12, function(h) {
     dep_var   <- paste0("cumF", h, "_dlog_capital")
-    rhs_terms <- c("shock_std", controls_vec_nocy)
+    rhs_terms <- c("shock_exp", controls_vec_nocy)
     rhs_terms <- rhs_terms[nzchar(rhs_terms)]
     rhs_str   <- paste(rhs_terms, collapse = " + ")
     fml_str   <- paste(dep_var, "~", rhs_str, "| name + sec + dateq")
@@ -338,8 +325,8 @@ extract_shock_path <- function(models) {
     horizon = 0:12,
     beta = purrr::map_dbl(models, function(m) {
       coefs <- coef(m)
-      if ("shock_std" %in% names(coefs)) {
-        coefs[["shock_std"]]
+      if ("shock_exp" %in% names(coefs)) {
+        coefs[["shock_exp"]]
       } else {
         NA_real_
       }
@@ -347,9 +334,9 @@ extract_shock_path <- function(models) {
     se = purrr::map_dbl(models, function(m) {
       vc <- vcov(m)
       if (!is.null(dim(vc)) &&
-          "shock_std" %in% rownames(vc) &&
-          "shock_std" %in% colnames(vc)) {
-        sqrt(vc["shock_std", "shock_std"])
+          "shock_exp" %in% rownames(vc) &&
+          "shock_exp" %in% colnames(vc)) {
+        sqrt(vc["shock_exp", "shock_exp"])
       } else {
         NA_real_
       }
@@ -404,7 +391,7 @@ p_leverage_channel <- ggplot(dyn_lev_channel,
   labs(
     title = "Canal de apalancamiento",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión",
+    y     = "Efecto acumulado en Δlog(K)",
     color = "Submuestra",
     fill  = "Submuestra"
   ) +
@@ -424,7 +411,7 @@ p_default_channel <- ggplot(dyn_def_channel,
   labs(
     title = "Canal distancia al default",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión",
+    y     = "Efecto acumulado en Δlog(K)",
     color = "Submuestra",
     fill  = "Submuestra"
   ) +
@@ -461,7 +448,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 
 # 4) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
-controls_firm  <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
 controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
@@ -471,18 +458,18 @@ res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
-    " ~ shock_std + lev_shock + d2d_shock + ", all_controls,
+    " ~ shock_exp + lev_shock + d2d_shock + ", all_controls,
     " | name + sec + dateq"
   ))
   feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
 })
 
-# 6) Extraer coeficientes y errores estándar para 'shock_std'
+# 6) Extraer coeficientes y errores estándar para 'shock_exp'
 # -------------------------------------------------------
 avg_coefs <- tibble::tibble(
   horizon    = 0:12,
-  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_std"]),
-  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_std","shock_std"]))
+  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp"]),
+  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp","shock_exp"]))
 )
 
 # 7) Graficar la respuesta promedio al shock
@@ -498,7 +485,7 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Figura 2: Respuesta Dinámica de la Inversión ante un Shock Monetario",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión"
+    y     = "Efecto acumulado en Δlog(K)"
   ) +
   theme_minimal()
 
@@ -523,25 +510,25 @@ if (!"Ldl_capital" %in% names(df)) {
     ungroup()
 }
 
-# 2) Winsorizar y estandarizar leverage y dd a nivel global
+# 2) Winsorizar y de-mean leverage y dd a nivel global
 # ----------------------------------------------------------
 df <- prep_fin_vars(df)
 
 # 3) Interacciones con shock y con dlog_gdp (si existe)
 # ------------------------------------------------------
-if ("dlog_gdp" %in% names(df)) {␊
-  df <- df %>%␊
-    mutate(␊
-      lev_shock_gdp = L1_lev_std * dlog_gdp,
-      d2d_shock_gdp = L1_dd_std  * dlog_gdp
-    )␊
-}␊
-␊
-df <- df %>%␊
-  mutate(␊
-    lev_shock = L1_lev_std * shock_std,
-    d2d_shock = L1_dd_std  * shock_std
-  )␊
+if ("dlog_gdp" %in% names(df)) {
+  df <- df %>%
+    mutate(
+      lev_shock_gdp = L1_lev_dm * dlog_gdp,
+      d2d_shock_gdp = L1_dd_dm  * dlog_gdp
+    )
+}
+
+df <- df %>%
+  mutate(
+    lev_shock = L1_lev_dm * shock_exp,
+    d2d_shock = L1_dd_dm  * shock_exp
+  )
 
 # 4) Construir cumFh_dlog_capital para h = 0…12
 # --------------------------------------
@@ -565,7 +552,7 @@ df_dyn11 <- if (!all(vars_cap11 %in% names(df))) {
 
 # 5) Definir controles firm-level y macro
 # --------------------------------------
-controls_firm  <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
 controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn11))
 base_controls  <- c(controls_firm, controls_macro)
 
@@ -624,7 +611,7 @@ p11a <- ggplot(coef_lev_lag, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Panel (a): Heterogeneidad por apalancamiento",
     x     = "Trimestres",
-    y     = "Efecto acumulado de la inversion residual"
+    y     = "Efecto acumulado en Δlog(K) residual"
   ) +
   theme_minimal()
 
@@ -638,7 +625,7 @@ p11b <- ggplot(coef_dd_lag, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Panel (b): Heterogeneidad por distancia al default",
     x     = "Trimestres",
-    y     = "Efecto acumulado de la inversion residual"
+    y     = "Efecto acumulado en Δlog(K) residual"
   ) +
   theme_minimal()
 
@@ -688,7 +675,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 
 # 5) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
-controls_firm  <- c("L1_rsales_g_std", "L1_size_raw", "L1_sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
 controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
@@ -698,18 +685,18 @@ res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
-    " ~ shock_std + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
+    " ~ shock_exp + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
     " | name + sec + dateq"
   ))
   feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
 })
 
-# 7) Extraer coeficientes y errores estándar para 'shock_std'
+# 7) Extraer coeficientes y errores estándar para 'shock_exp'
 # -------------------------------------------------------
 avg_coefs <- tibble::tibble(
   horizon    = 0:12,
-  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_std"]),
-  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_std","shock_std"]))
+  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp"]),
+  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp","shock_exp"]))
 )
 
 # 8) Graficar la respuesta promedio al shock
@@ -725,7 +712,7 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Figura 4: Respuesta Dinámica de la Inversión residual ante un Shock Monetario",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión residual"
+    y     = "Efecto acumulado en Δlog(K) residual"
   ) +
   theme_minimal()
 
@@ -733,8 +720,10 @@ print(p_avg)
 
 
 # ======================================================================
-# Figura 5: Dinámica de Respuestas al Shock Monetario por Tamaño 
+# Figura 5: Dinámica de Respuestas al Shock Monetario por Tamaño
 # ======================================================================
+
+df_cntl <- df
 
 df_cntl <- df_cntl %>%
   dplyr::group_by(name) %>%
@@ -747,8 +736,8 @@ df_cntl <- df_cntl %>%
   ) %>%
   dplyr::ungroup() %>%
   prep_ctrl_var(var_in = "rsales_g", prefix = "rsales_g", p = 0.005) %>%
-  prep_ctrl_var(var_in = "current_ratio", prefix = "sh_current_a", p = 0.005) %>%
-  add_lagged_controls(c("rsales_g_std", "size_raw", "sh_current_a_std")) %>%
+  prep_ctrl_var(var_in = "current_ratio", prefix = "current_ratio", p = 0.005) %>%
+  add_lagged_controls(c("rsales_g_win", "size_raw", "current_ratio_win")) %>%
   dplyr::mutate(
     size_win = winsorize(size_raw)
   ) %>%
@@ -766,13 +755,13 @@ if ("dlog_gdp" %in% names(df_cntl)) {
   warning("No existe 'dlog_gdp'; se omite creación de 'size_gdp'.")
 }
 
-if ("shock_std" %in% names(df_cntl)) {
+if ("shock_exp" %in% names(df_cntl)) {
   df_cntl <- df_cntl %>%
     mutate(
-      size_shock = if (!"size_shock" %in% names(.)) size_win * shock_std else size_shock
+      size_shock = if (!"size_shock" %in% names(.)) size_win * shock_exp else size_shock
     )
 } else {
-  stop("Falta la variable 'shock_std' en el data frame.")
+  stop("Falta la variable 'shock_exp' en el data frame.")
 }
 
 # 3) Construir dinámicas acumuladas cumFh_dlog_capital para h = 0…12
@@ -798,7 +787,7 @@ df_dyn12 <- if (!all(vars_cum %in% names(df_cntl))) {
 
 # 4) Definir controles firm-level y macro presentes
 # --------------------------------------------------
-controls_firm  <- c("L1_rsales_g_std", "L1_sh_current_a_std")
+controls_firm  <- c("L1_rsales_g_win", "L1_current_ratio_win")
 controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
 present_macro  <- intersect(controls_macro, names(df_dyn12))
 if (length(present_macro) < length(controls_macro)) {
@@ -843,7 +832,7 @@ ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Figura 5: Heterogeneidad de la inversion por tamaño de empresa",
     x     = "Trimestres",
-    y     = "Efecto acumulado de inversión"
+    y     = "Efecto acumulado en Δlog(K)"
   ) +
   theme_minimal()
 
@@ -868,17 +857,17 @@ df_cntl13 <- df_cntl13 %>%
   dplyr::select(-size_raw) %>%
   prep_fin_vars()
 
-# 2) rear interacciones con shock y dlog_gdp
+# 2) Crear interacciones con shock y dlog_gdp
 # -------------------------------------------
-df_cntl13 <- df_cntl13 %>%␊
-  mutate(␊
-    size_shock    = size_win * shock_std,␊
-    size_gdp      = size_win * dlog_gdp,␊
-    lev_shock     = L1_lev_std * shock_std,
-    lev_shock_gdp = L1_lev_std * dlog_gdp,
-    d2d_shock     = L1_dd_std  * shock_std,
-    d2d_shock_gdp = L1_dd_std  * dlog_gdp
-  )␊
+df_cntl13 <- df_cntl13 %>%
+  mutate(
+    size_shock    = size_win * shock_exp,
+    size_gdp      = size_win * dlog_gdp,
+    lev_shock     = L1_lev_dm * shock_exp,
+    lev_shock_gdp = L1_lev_dm * dlog_gdp,
+    d2d_shock     = L1_dd_dm  * shock_exp,
+    d2d_shock_gdp = L1_dd_dm  * dlog_gdp
+  )
 
 # 3) Construir dlog_capital y dinámicas cumFh_dlog_capital
 # ---------------------------------------------------------
@@ -902,7 +891,7 @@ df_dyn13 <- if (!all(vars13 %in% names(df_cntl13))) {
 
 # 4) Definir controles firm-level y macro
 # ----------------------------------------
-controls_firm13  <- c("L1_rsales_g_std", "L1_sh_current_a_std")
+controls_firm13  <- c("L1_rsales_g_win", "L1_current_ratio_win")
 controls_macro13 <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn13))
 all_controls13   <- paste(c(controls_firm13, controls_macro13), collapse = " + ")
 
@@ -956,7 +945,7 @@ p13a <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_size)) +
   geom_ribbon(aes(ymin = beta_size - 1.645 * se_size,
                   ymax = beta_size + 1.645 * se_size),
               fill = "darkgreen", alpha = 0.2) +
-    labs(title = "Panel (a): Heterogeneidad por tamaño", x = "Trimestres", y = "Efecto acumulado de inversión") +
+    labs(title = "Panel (a): Heterogeneidad por tamaño", x = "Trimestres", y = "Efecto acumulado en Δlog(K)") +
   theme_minimal()
 
 # 5b) Gráfico Leverage × Shock
@@ -965,7 +954,7 @@ p13b <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_lev)) +
   geom_ribbon(aes(ymin = beta_lev - 1.645 * se_lev,
                   ymax = beta_lev + 1.645 * se_lev),
               fill = "firebrick", alpha = 0.2) +
-    labs(title = "Panel (b): Heterogeneidad por apalancamiento", x = "Trimestres", y = "Efecto acumulado de inversión") +
+    labs(title = "Panel (b): Heterogeneidad por apalancamiento", x = "Trimestres", y = "Efecto acumulado en Δlog(K)") +
   theme_minimal()
 
 # 5c) Gráfico DD × Shock
@@ -974,7 +963,7 @@ p13c <- ggplot(dd_size_coefs, aes(x = horizon, y = beta_dd)) +
   geom_ribbon(aes(ymin = beta_dd - 1.645 * se_dd,
                   ymax = beta_dd + 1.645 * se_dd),
               fill = "steelblue", alpha = 0.2) +
-    labs(title = "Panel (c): Heterogeneidad por distancia al default", x = "Trimestres", y = "Efecto acumulado de inversión") +
+    labs(title = "Panel (c): Heterogeneidad por distancia al default", x = "Trimestres", y = "Efecto acumulado en Δlog(K)") +
   theme_minimal()
 
 # 6) Montaje final 3×1
