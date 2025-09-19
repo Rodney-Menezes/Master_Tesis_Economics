@@ -2,9 +2,10 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
 %IMPULSE_RESPONSE_HETEROGENEITY Compute IRFs for leverage and default-distance heterogeneity.
 %   irfResults = IMPULSE_RESPONSE_HETEROGENEITY(mInvestmentPanel, mCapitalPanel,
 %   mDebtPanel, mCashPanel, mDefaultCutoffPanel, mInSample, tPre) computes
-%   the impulse responses of investment rates along two heterogeneity
-%   channels (leverage and distance-to-default) over a default horizon of
-%   12 quarters using the simulated panel outputs from TRANSITION_PATH_PANEL.
+%   the cumulative impulse responses of investment rates along two
+%   heterogeneity channels (leverage and distance-to-default) over a default
+%   horizon of 12 quarters using the simulated panel outputs from
+%   TRANSITION_PATH_PANEL.
 %
 %   Additional name-value pair arguments:
 %       'Horizon'      - Number of post-shock quarters to report (default 12).
@@ -113,15 +114,20 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
         irfDistanceFar(h,1) = mean(investmentRate(distanceFarMask, idx), 'omitnan') - baselineFarDefault;
     end
 
+    irfLeverageLow = cumsum(irfLeverageLow);
+    irfLeverageHigh = cumsum(irfLeverageHigh);
+    irfDistanceClose = cumsum(irfDistanceClose);
+    irfDistanceFar = cumsum(irfDistanceFar);
+
     irfLeverageLow = 100 * irfLeverageLow;
     irfLeverageHigh = 100 * irfLeverageHigh;
     irfDistanceClose = 100 * irfDistanceClose;
     irfDistanceFar = 100 * irfDistanceFar;
 
     tblLeverage = table(quarters, irfLeverageLow, irfLeverageHigh, ...
-        'VariableNames', {'Quarter','BajoApalancamiento','AltoApalancamiento'});
+        'VariableNames', {'Quarter','BajoApalancamientoAcum','AltoApalancamientoAcum'});
     tblDistance = table(quarters, irfDistanceClose, irfDistanceFar, ...
-        'VariableNames', {'Quarter','CercaDefault','LejosDefault'});
+        'VariableNames', {'Quarter','CercaDefaultAcum','LejosDefaultAcum'});
 
     writetable(tblLeverage, fullfile(resultsDir, 'IRF_Leverage.xlsx'));
     writetable(tblDistance, fullfile(resultsDir, 'IRF_dd.xlsx'));
@@ -134,7 +140,7 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel('p.p. respecto al pre-shock');
+    ylabel('p.p. acumulados respecto al estado estacionario');
     title('Canal de apalancamiento');
     legend({'Bajo apalancamiento','Alto apalancamiento'},'Location','best');
     hold off;
@@ -146,7 +152,7 @@ function irfResults = impulse_response_heterogeneity(mInvestmentPanel,mCapitalPa
     yline(0,'--','Color',[0.2 0.2 0.2]);
     grid on;
     xlabel('Trimestres');
-    ylabel('p.p. respecto al pre-shock');
+    ylabel('p.p. acumulados respecto al estado estacionario');
     title('Canal distancia al default');
     legend({'Cerca del default','Lejos del default'},'Location','best');
     hold off;
