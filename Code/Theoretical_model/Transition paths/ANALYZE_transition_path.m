@@ -330,6 +330,16 @@ print(irfHetResults.figure,'../Results/investment_irf_heterogeneity.eps','-depsc
 
 tPreHeterogeneity                 = tPre;
 
+%%%
+% Investment IRFs with continuous heterogeneity (demeaned within firm)
+%%%
+
+irfContinuousResults = impulse_response_continuous_heterogeneity(mInvestmentPanel,mCapitalPanel, ...
+                                                            mDebtPanel,mCashPanel,mDefaultCutoffPanel, ...
+                                                            mInSample,tPre);
+set(irfContinuousResults.figure,'PaperUnits','inches','PaperPosition',[0 0 10 4]);
+print(irfContinuousResults.figure,'../Results/investment_irf_continuous_heterogeneity.eps','-depsc');
+
 
 
 %%%
