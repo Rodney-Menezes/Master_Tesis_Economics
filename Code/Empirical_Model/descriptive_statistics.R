@@ -147,40 +147,6 @@ if ("leverage" %in% names(df)) {
 if ("dd" %in% names(df)) {
   df <- df %>% mutate(dd_std = standardize_vec(dd))
 }
-
-# ---------------------------------------------------
-# 2) Tabla 1: Estadísticas de shocks monetarios
-# ---------------------------------------------------
-df1 <- df %>% rename(
-  HF_shock = mps,   # Monetary Policy Surprise (winsorizado)
-  Q_shock  = mpso   # Otras sorpresas ortogonalizadas (winsorizado)
-)
-
-stats_HF <- df1 %>% summarise(
-  Mean   = mean_if_any(HF_shock),
-  Median = if (all(is.na(HF_shock))) NA_real_ else median(HF_shock, na.rm = TRUE),
-  SD     = if (sum(!is.na(HF_shock)) <= 1) NA_real_ else sd(HF_shock, na.rm = TRUE),
-  Min    = if (all(is.na(HF_shock))) NA_real_ else min(HF_shock, na.rm = TRUE),
-  Max    = if (all(is.na(HF_shock))) NA_real_ else max(HF_shock, na.rm = TRUE),
-  N      = sum(!is.na(HF_shock))
-)
-stats_Q  <- df1 %>% summarise(
-  Mean   = mean_if_any(Q_shock),
-  Median = if (all(is.na(Q_shock))) NA_real_ else median(Q_shock, na.rm = TRUE),
-  SD     = if (sum(!is.na(Q_shock)) <= 1) NA_real_ else sd(Q_shock, na.rm = TRUE),
-  Min    = if (all(is.na(Q_shock))) NA_real_ else min(Q_shock, na.rm = TRUE),
-  Max    = if (all(is.na(Q_shock))) NA_real_ else max(Q_shock, na.rm = TRUE),
-  N      = sum(!is.na(Q_shock))
-)
-
-tabla1 <- data.frame(
-  Estadístico      = c("Mean", "Median", "S.D.", "Min", "Max", "Observaciones"),
-  High_Frequency   = unlist(stats_HF),
-  Smoothed_Quarter = unlist(stats_Q)
-)
-cat("\n--- Tabla 1: Estadísticas de shocks monetarios (winsorizados) ---\n")
-print(tabla1)
-
 # -------------------------------
 # Tabla 2: Firm-Level Variables
 # -------------------------------
