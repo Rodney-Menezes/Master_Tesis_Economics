@@ -47,7 +47,7 @@ rrhoProd    = 0.90;
 %%%
 
 % Heterogeneous production firms
-ttheta 			 = .33;								% capital coefficient
+ttheta 			 = .21;								% capital coefficient
 nnu 			 = .67;								% labor coefficient
 ddelta           = .025;							% capital depreciation rate
 
