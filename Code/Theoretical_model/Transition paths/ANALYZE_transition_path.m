@@ -284,7 +284,7 @@ plot(vTime,100 * log(vAggregateConsumption(1:T,1) / aggregateConsumptionSS),'lin
 plot(vTime,100 * log(vAggregateInvestment(1:T,1) / (aggregateInvestmentSS)),'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
 xlim([1 12])
-h	 = legend('Output','Consumption','Investment', 'Net inv');
+h	 = legend('Output','Consumption','Investment');
 set(h,'interpreter','latex','location','northeast','fontsize',14)
 set(gcf,'color','w')
 xlabel('Quarters','interpreter','latex')
