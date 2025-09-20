@@ -26,7 +26,7 @@ ssigmaS = 0.02;
 rrhoS   = 0.8;
 
 % Exogenously fix persistence of productivity shocks
-rrhoProd    = 0.927;
+rrhoProd    = 0.90;
 
 rho = 0.8   % Persistencia de la tasa de interes.
 
@@ -37,7 +37,7 @@ rho = 0.8   % Persistencia de la tasa de interes.
 % Heterogeneous production firms
 ttheta 			 = .21;								% capital coefficient
 nnu 			 = .67;								% labor coefficient
-ddelta           = .25;							% capital depreciation rate
+ddelta           = .025;							% capital depreciation rate
 
 % Firm lifecycle
 ppiExit          = (.1) / (4);			 % exogenous exit rate (quarterly); hit 8.7% annual exit rate given a 3% annual default rate. 
@@ -52,12 +52,12 @@ pphiInflation   = 1.25;						        % coefficient on inflation in Taylor rule
 pphiOutput      = .5;							    % coefficient on output in Taylor rule
 
 % Capital good producers
-pphiCapital     = 16;							    % coefficient in capital adjustment cost; 1 / pphi = price elasticity w.r.t. I/K
+pphiCapital     = 21;							    % coefficient in capital adjustment cost; 1 / pphi = price elasticity w.r.t. I/K
 qSS             = 1;						        % steady state price of capital = 1
 
 % Representative household
 bbeta		    = 0.99;								% discount factor (quarterly)
-nSS				= 0.33;								% steady state employment rate.
+nSS				= 0.6;								% steady state employment rate.
 cchi            = 1.72;                                % disuility of labor (will be recalibrated)
 ssigma          = 1;                                % coefficient of relative risk aversion
 
