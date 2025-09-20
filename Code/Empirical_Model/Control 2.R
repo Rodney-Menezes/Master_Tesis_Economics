@@ -672,7 +672,7 @@ res_avg <- map(0:12, function(h) {
     dep_var,
     " ~ ", paste(rhs_terms, collapse = " + "),
     " | name + sec + dateq"
-  ))
+  ))}
 
 # 7) Extraer coeficientes y errores estándar para 'shock_exp'
 # -------------------------------------------------------
@@ -984,7 +984,8 @@ p13c <- ggplot(dd_size_coefs, aes(x = horizon, y = beta_dd)) +
 
 # 6) Montaje final 3×1
 # ----------------------
-(p13a / p13b / p13c) +
+fig6 <- (p13a / p13b / p13c) +
   plot_annotation(
-    title = "Figura 6: Heterogeneidad conjunta de la posición Financiera y tamaño en la dinamica de la inversion"
-)
+    title = "Figura 6: Heterogeneidad conjunta de la posición financiera y tamaño en la dinámica de la inversión"
+  )
+
