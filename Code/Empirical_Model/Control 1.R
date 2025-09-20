@@ -127,6 +127,18 @@ df <- df %>%
   dplyr::select(-ratio_cap) %>%
   dplyr::filter(!is.na(dlog_capital))
 
+# Asegurar la disponibilidad de dlog_gdp aun cuando no venga en el archivo original
+if (!"dlog_gdp" %in% names(df)) {
+  if ("L0_dlog_gdp" %in% names(df)) {
+    df <- df %>%
+      dplyr::mutate(dlog_gdp = as.numeric(L0_dlog_gdp))
+  } else {
+    warning("No se encontró 'dlog_gdp' ni 'L0_dlog_gdp'; se crearán interacciones con valores NA.")
+    df <- df %>%
+      dplyr::mutate(dlog_gdp = NA_real_)
+  }
+}
+
 # Shock: winsor por país y signo expansivo (>0)
 df <- df %>%
   prep_shock_var(p = 0.005)
@@ -350,11 +362,11 @@ rhs_terms_avg <- paste(c("shock_exp", "lev_shock", "d2d_shock", controls_firm, c
 # --------------------------------------------------------
 res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(␊
-    dep_var,␊
+  fml <- as.formula(paste0(
+    dep_var,
     " ~ ", rhs_terms_avg,
     " | name + sec + Country^dateq"
-  ))␊
+  ))
   feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
 })
 
@@ -444,11 +456,11 @@ df_dyn11 <- if (!all(vars_cap11 %in% names(df))) {
   df
 }
 
-# 5) Definir controles firm-level y macro␊
-# --------------------------------------␊
-controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")␊
+# 5) Definir controles firm-level y macro
+# --------------------------------------
+controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
 controls_macro <- intersect(c("lev_gdp", "dd_gdp"), names(df_dyn11))
-base_controls  <- c(controls_firm, controls_macro)␊
+base_controls  <- c(controls_firm, controls_macro)
 
 # 6) Estimar dinámicas controlando Ldl_capital
 # --------------------------------------
@@ -578,8 +590,8 @@ rhs_terms_avg <- paste(c("shock_exp", "lev_shock", "d2d_shock", "Ldl_capital", c
 # --------------------------------------------------------
 res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
-  fml <- as.formula(paste0(␊
-    dep_var,␊
+  fml <- as.formula(paste0(
+    dep_var,
     " ~ ", rhs_terms_avg,
     " | name + sec + Country^dateq"
   ))
@@ -805,30 +817,30 @@ rhs_lev_size      <- paste(c("size_shock", "lev_shock", "lev_shock_gdp", control
 rhs_dd_size       <- paste(c("size_shock", "d2d_shock", "d2d_shock_gdp", controls_vec13), collapse = " + ")
 
 # 4a) Estimar dinámica Size + Leverage
-res_lev_size <- map(0:12, function(h) {␊
-  feols(␊
-    as.formula(paste0(␊
-      vars13[h+1],␊
+res_lev_size <- map(0:12, function(h) {
+  feols(
+    as.formula(paste0(
+      vars13[h+1],
       " ~ ", rhs_lev_size,
       " | name + sec + Country^dateq"
-    )),␊
-    data    = df_dyn13,␊
-    cluster = ~ Country + dateq + name␊
-  )␊
-})␊
+    )),
+    data    = df_dyn13,
+    cluster = ~ Country + dateq + name
+  )
+})
 
 # 4b) Estimar dinámica Size + DD
-res_dd_size <- map(0:12, function(h) {␊
-  feols(␊
-    as.formula(paste0(␊
-      vars13[h+1],␊
+res_dd_size <- map(0:12, function(h) {
+  feols(
+    as.formula(paste0(
+      vars13[h+1],
       " ~ ", rhs_dd_size,
       " | name + sec + Country^dateq"
-    )),␊
-    data    = df_dyn13,␊
-    cluster = ~ Country + dateq + name␊
-  )␊
-})␊
+    )),
+    data    = df_dyn13,
+    cluster = ~ Country + dateq + name
+  )
+})
 
 # 5) Extraer coeficientes y errores
 # ----------------------------------
