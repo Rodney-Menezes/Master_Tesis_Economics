@@ -333,7 +333,7 @@ if (!all(vars_cap %in% names(df))) {
 }
 
 # 4) Definir controles y cadena de regresores
-ccontrols_firm    <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
+controls_firm    <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
 controls_macro   <- intersect(c("lev_pcf", "dd_pcf"), names(df_dyn_nocy))
 controls_vec_nocy <- c(controls_firm, controls_macro)
 
