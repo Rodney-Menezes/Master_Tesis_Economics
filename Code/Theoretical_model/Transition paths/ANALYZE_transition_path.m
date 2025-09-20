@@ -359,28 +359,29 @@ print('../Results/rep_firm_comparison.eps','-depsc')
 % Heterogeneity across leverage and default distance
 %%%
 
-baselineLowLev      = vCapitalByLeverageSS(1,1);
-baselineHighLev     = vCapitalByLeverageSS(1,2);
-baselineCloseDef    = vCapitalByDefaultDistanceSS(1,1);
-baselineFarDef      = vCapitalByDefaultDistanceSS(1,2);
+capitalSeriesLeverage  = [vCapitalByLeverageSS; mCapitalByLeverage(1:T,:)];
+capitalSeriesDefault   = [vCapitalByDefaultDistanceSS; mCapitalByDefaultDistance(1:T,:)];
 
-if isnan(baselineLowLev) || baselineLowLev == 0
-    baselineLowLev  = eps;
-end
-if isnan(baselineHighLev) || baselineHighLev == 0
-    baselineHighLev = eps;
-end
-if isnan(baselineCloseDef) || baselineCloseDef == 0
-    baselineCloseDef = eps;
-end
-if isnan(baselineFarDef) || baselineFarDef == 0
-    baselineFarDef  = eps;
-end
+currentCapitalLeverage = capitalSeriesLeverage(1:T,:);
+nextCapitalLeverage    = capitalSeriesLeverage(2:end,:);
+currentCapitalDefault  = capitalSeriesDefault(1:T,:);
+nextCapitalDefault     = capitalSeriesDefault(2:end,:);
 
-irfCapitalLowLev    = 100 * (mCapitalByLeverage(1:T,1) / baselineLowLev - 1);
-irfCapitalHighLev   = 100 * (mCapitalByLeverage(1:T,2) / baselineHighLev - 1);
-irfCapitalCloseDef  = 100 * (mCapitalByDefaultDistance(1:T,1) / baselineCloseDef - 1);
-irfCapitalFarDef    = 100 * (mCapitalByDefaultDistance(1:T,2) / baselineFarDef - 1);
+denomLeverage = max(currentCapitalLeverage,eps);
+denomDefault  = max(currentCapitalDefault,eps);
+
+mIKByLeverage         = (nextCapitalLeverage - (1 - ddelta) * EOmegaTerm2 * currentCapitalLeverage) ./ denomLeverage;
+mIKByDefaultDistance  = (nextCapitalDefault - (1 - ddelta) * EOmegaTerm2 * currentCapitalDefault) ./ denomDefault;
+
+mIKByLeverage(~isfinite(mIKByLeverage))                       = NaN;
+mIKByDefaultDistance(~isfinite(mIKByDefaultDistance))         = NaN;
+
+ikBaseline = 1 - (1 - ddelta) * EOmegaTerm2;
+
+irfIKLowLev    = 100 * (mIKByLeverage(:,1) / ikBaseline - 1);
+irfIKHighLev   = 100 * (mIKByLeverage(:,2) / ikBaseline - 1);
+irfIKCloseDef  = 100 * (mIKByDefaultDistance(:,1) / ikBaseline - 1);
+irfIKFarDef    = 100 * (mIKByDefaultDistance(:,2) / ikBaseline - 1);
 
 figure
 
@@ -390,8 +391,8 @@ h.PaperPosition = [0 0 13 4];
 
 subplot(1,2,1)
 hold on
-plot(vTime,irfCapitalLowLev,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
-plot(vTime,irfCapitalHighLev,'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
+plot(vTime,irfIKLowLev,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
+plot(vTime,irfIKHighLev,'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
 xlim([1 12])
 h        = legend('Low leverage','High leverage');
@@ -400,13 +401,13 @@ set(gcf,'color','w')
 xlabel('Quarters','interpreter','latex')
 ylabel('$\%$ deviation','interpreter','latex')
 grid on
-title('Capital by leverage','interpreter','latex','fontsize',14)
+title('Investment rate by leverage (I/K)','interpreter','latex','fontsize',14)
 hold off
 
 subplot(1,2,2)
 hold on
-plot(vTime,irfCapitalCloseDef,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
-plot(vTime,irfCapitalFarDef,'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
+plot(vTime,irfIKCloseDef,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
+plot(vTime,irfIKFarDef,'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
 xlim([1 12])
 h        = legend('Near default','Far from default');
@@ -415,10 +416,37 @@ set(gcf,'color','w')
 xlabel('Quarters','interpreter','latex')
 ylabel('$\%$ deviation','interpreter','latex')
 grid on
-title('Capital by distance to default','interpreter','latex','fontsize',14)
+title('Investment rate by distance to default (I/K)','interpreter','latex','fontsize',14)
 hold off
 
 print('../Results/heterogeneity_channels.eps','-depsc')
+
+validLeverage      = ~isnan(mIKByLeverage);
+weightedNumerator  = sum((mMassByLeverage .* mIKByLeverage) .* validLeverage,2);
+weightedDenominator= sum((mMassByLeverage .* validLeverage),2);
+avgIKSeries        = weightedNumerator ./ weightedDenominator;
+avgIKSeries(weightedDenominator == 0) = NaN;
+
+irfIKAverage       = 100 * (avgIKSeries / ikBaseline - 1);
+
+figure
+
+h               = gcf;
+h.PaperUnits    = 'inches';
+h.PaperPosition = [0 0 6.5 4];
+
+hold on
+plot(vTime,irfIKAverage,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
+plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
+xlim([1 12])
+set(gcf,'color','w')
+xlabel('Quarters','interpreter','latex')
+ylabel('$\%$ deviation','interpreter','latex')
+grid on
+title('Average investment rate (I/K)','interpreter','latex','fontsize',14)
+hold off
+
+print('../Results/heterogeneity_channels_average.eps','-depsc')
 
 
 %----------------------------------------------------------------
