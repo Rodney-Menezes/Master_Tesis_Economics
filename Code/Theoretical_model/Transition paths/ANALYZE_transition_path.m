@@ -392,10 +392,16 @@ mIKByDefaultDistance(zeroCapitalDefault)     = NaN;
 
 ikBaseline = 1 - (1 - ddelta) * EOmegaTerm2;
 
-irfIKLowLev    = 100 * (mIKByLeverage(:,1) / ikBaseline - 1);
-irfIKHighLev   = 100 * (mIKByLeverage(:,2) / ikBaseline - 1);
-irfIKCloseDef  = 100 * (mIKByDefaultDistance(:,1) / ikBaseline - 1);
-irfIKFarDef    = 100 * (mIKByDefaultDistance(:,2) / ikBaseline - 1);
+ikDeviationLeverage        = 100 * (mIKByLeverage - ikBaseline);
+ikDeviationDefaultDistance = 100 * (mIKByDefaultDistance - ikBaseline);
+
+ikDeviationLeverage(~isfinite(ikDeviationLeverage))                       = 0;
+ikDeviationDefaultDistance(~isfinite(ikDeviationDefaultDistance))         = 0;
+
+irfIKLowLev    = cumsum(ikDeviationLeverage(:,1));
+irfIKHighLev   = cumsum(ikDeviationLeverage(:,2));
+irfIKCloseDef  = cumsum(ikDeviationDefaultDistance(:,1));
+irfIKFarDef    = cumsum(ikDeviationDefaultDistance(:,2));
 
 figure
 
@@ -405,32 +411,32 @@ h.PaperPosition = [0 0 13 4];
 
 subplot(1,2,1)
 hold on
-plot(vTime,irfIKLowLev,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
-plot(vTime,irfIKHighLev,'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
-plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
+plot(vTime,irfIKLowLev,'linewidth',1.5,'linestyle','-','color',[0 112/255 192/255])
+plot(vTime,irfIKHighLev,'linewidth',1.5,'linestyle','--','color',[217/255 83/255 25/255])
+plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color',[.3 .3 .3])
 xlim([1 12])
-h        = legend('Low leverage','High leverage');
-set(h,'interpreter','latex','location','northeast','fontsize',14)
+h        = legend('Bajo apalancamiento','Alto apalancamiento');
+set(h,'interpreter','latex','location','southwest','fontsize',14)
 set(gcf,'color','w')
-xlabel('Quarters','interpreter','latex')
-ylabel('$\%$ deviation','interpreter','latex')
+xlabel('Trimestres','interpreter','latex')
+ylabel('Variacion acumulada inv./capital (p.p. vs. linea base)','interpreter','latex')
 grid on
-title('Investment rate by leverage (I/K)','interpreter','latex','fontsize',14)
+title('Canal de apalancamiento','interpreter','latex','fontsize',14)
 hold off
 
 subplot(1,2,2)
 hold on
-plot(vTime,irfIKCloseDef,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
-plot(vTime,irfIKFarDef,'linewidth',1.5,'linestyle','--','color',[178/255,34/255,34/255])
-plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
+plot(vTime,irfIKFarDef,'linewidth',1.5,'linestyle','-','color',[0 112/255 192/255])
+plot(vTime,irfIKCloseDef,'linewidth',1.5,'linestyle','--','color',[217/255 83/255 25/255])
+plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color',[.3 .3 .3])
 xlim([1 12])
-h        = legend('Near default','Far from default');
-set(h,'interpreter','latex','location','northeast','fontsize',14)
+h        = legend('Lejos del default','Cerca del default');
+set(h,'interpreter','latex','location','southwest','fontsize',14)
 set(gcf,'color','w')
-xlabel('Quarters','interpreter','latex')
-ylabel('$\%$ deviation','interpreter','latex')
+xlabel('Trimestres','interpreter','latex')
+ylabel('Variacion acumulada inv./capital (p.p. vs. linea base)','interpreter','latex')
 grid on
-title('Investment rate by distance to default (I/K)','interpreter','latex','fontsize',14)
+title('Canal distancia al default','interpreter','latex','fontsize',14)
 hold off
 
 print('../Results/heterogeneity_channels.eps','-depsc')
