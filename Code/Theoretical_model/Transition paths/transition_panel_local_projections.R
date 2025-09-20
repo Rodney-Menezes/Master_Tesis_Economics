@@ -46,6 +46,23 @@ library(ggplot2)
 # ------------------------------
 # Helper utilities
 # ------------------------------
+detect_script_dir <- function() {
+  cmd_args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- "--file="
+  file_index <- grep(file_arg, cmd_args)
+  if (length(file_index) > 0) {
+    script_path <- sub(file_arg, "", cmd_args[file_index[1]])
+    return(dirname(normalizePath(script_path)))
+  }
+  
+  ofile <- tryCatch(sys.frames()[[1]]$ofile, error = function(e) NULL)
+  if (!is.null(ofile)) {
+    return(dirname(normalizePath(ofile)))
+  }
+  
+  normalizePath(getwd())
+}
+
 standardize <- function(x) {
   mu <- mean(x, na.rm = TRUE)
   sd_val <- stats::sd(x, na.rm = TRUE)
@@ -141,7 +158,21 @@ shock_decay <- 0.5
 shock_multiplier <- 4
 pre_sample_drop <- 4
 horizons <- 0:12
-output_dir <- "../Results/panel_simulations"
+
+script_dir <- detect_script_dir()
+panel_dir <- Sys.getenv("TRANSITION_PANEL_DIR", unset = NA_character_)
+if (is.na(panel_dir) || !nzchar(panel_dir)) {
+  panel_dir <- script_dir
+} else {
+  panel_dir <- normalizePath(panel_dir)
+}
+
+output_dir <- Sys.getenv("TRANSITION_OUTPUT_DIR", unset = NA_character_)
+if (is.na(output_dir) || !nzchar(output_dir)) {
+  output_dir <- file.path(script_dir, "..", "Results", "panel_simulations")
+}
+output_dir <- normalizePath(output_dir, mustWork = FALSE)
+
 plot_results <- TRUE
 
 if (!dir.exists(output_dir)) {
@@ -151,7 +182,12 @@ if (!dir.exists(output_dir)) {
 # ------------------------------
 # Load available panel files
 # ------------------------------
-panel_files <- list.files(pattern = panel_pattern, full.names = TRUE)
+message(sprintf("Searching for panel files in: %s", panel_dir))
+panel_files <- list.files(path = panel_dir, pattern = panel_pattern, full.names = TRUE)
+if (length(panel_files) == 0) {
+  panel_files <- list.files(path = panel_dir, pattern = panel_pattern, full.names = TRUE, recursive = TRUE)
+}
+panel_files <- unique(panel_files)
 if (length(panel_files) == 0) {
   stop("No panel files found. Run the MATLAB routine to generate 'mTransitionPanel_*.csv'.")
 }
