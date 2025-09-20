@@ -672,7 +672,9 @@ res_avg <- map(0:12, function(h) {
     dep_var,
     " ~ ", paste(rhs_terms, collapse = " + "),
     " | name + sec + dateq"
-  ))}
+  ))
+  feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
+})
 
 # 7) Extraer coeficientes y errores estándar para 'shock_exp'
 # -------------------------------------------------------
