@@ -445,38 +445,35 @@ distanceSeriesFull          = [vDistanceByDefaultDistanceSS; mDistanceByDefaultD
 massSeriesLeverageFull      = massSeriesLeverage;
 massSeriesDefaultFull       = massSeriesDefault;
 
-massCurrentLeverage         = massSeriesLeverageFull(1:T,:);
-massCurrentDefault          = massSeriesDefaultFull(1:T,:);
-leverageCurrent             = leverageSeriesFull(1:T,:);
-distanceCurrent             = distanceSeriesFull(1:T,:);
+% Use the steady state distribution when weighting the interactions so that
+% the model counterpart mirrors the empirical regressions that rely on
+% predetermined (pre-shock) firm characteristics.
+massBaselineLeverage        = massSeriesLeverageFull(1,:);
+massBaselineDefault         = massSeriesDefaultFull(1,:);
+leverageBaseline            = leverageSeriesFull(1,:);
+distanceBaseline            = distanceSeriesFull(1,:);
 
 interactionLevLevel         = NaN(T,1);
 interactionDistLevel        = NaN(T,1);
 
 for t = 1 : T
 
-        weightsLev  = massCurrentLeverage(t,:);
-        leverageRow = leverageCurrent(t,:);
         ikRowLev    = mIKByLeverage(t,:);
-        validLev    = isfinite(weightsLev) & isfinite(leverageRow) & isfinite(ikRowLev);
-        weightLev   = sum(weightsLev(validLev));
+        validLev    = isfinite(massBaselineLeverage) & isfinite(leverageBaseline) & isfinite(ikRowLev);
+        weightLev   = sum(massBaselineLeverage(validLev));
         if weightLev > 0
-                interactionLevLevel(t,1) = sum(weightsLev(validLev) .* leverageRow(validLev) .* ikRowLev(validLev)) / weightLev;
+                interactionLevLevel(t,1) = sum(massBaselineLeverage(validLev) .* leverageBaseline(validLev) .* ikRowLev(validLev)) / weightLev;
         end
 
-        weightsDist  = massCurrentDefault(t,:);
-        distanceRow  = distanceCurrent(t,:);
         ikRowDist    = mIKByDefaultDistance(t,:);
-        validDist    = isfinite(weightsDist) & isfinite(distanceRow) & isfinite(ikRowDist);
-        weightDist   = sum(weightsDist(validDist));
+        validDist    = isfinite(massBaselineDefault) & isfinite(distanceBaseline) & isfinite(ikRowDist);
+        weightDist   = sum(massBaselineDefault(validDist));
         if weightDist > 0
-                interactionDistLevel(t,1) = sum(weightsDist(validDist) .* distanceRow(validDist) .* ikRowDist(validDist)) / weightDist;
+                interactionDistLevel(t,1) = sum(massBaselineDefault(validDist) .* distanceBaseline(validDist) .* ikRowDist(validDist)) / weightDist;
         end
 
 end
 
-massBaselineLeverage        = massSeriesLeverageFull(1,:);
-leverageBaseline            = leverageSeriesFull(1,:);
 validBaselineLeverage       = isfinite(massBaselineLeverage) & isfinite(leverageBaseline);
 weightBaselineLeverage      = sum(massBaselineLeverage(validBaselineLeverage));
 if weightBaselineLeverage > 0
@@ -486,8 +483,6 @@ else
         baselineInteractionLeverage = NaN;
 end
 
-massBaselineDefault         = massSeriesDefaultFull(1,:);
-distanceBaseline            = distanceSeriesFull(1,:);
 validBaselineDefault        = isfinite(massBaselineDefault) & isfinite(distanceBaseline);
 weightBaselineDefault       = sum(massBaselineDefault(validBaselineDefault));
 if weightBaselineDefault > 0
