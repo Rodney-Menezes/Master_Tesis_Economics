@@ -80,6 +80,13 @@ pphiS           = 0.10;    % valor inicial (ajustar según calibración)
 rrhoS           = 0.8;     % persistencia aproximada
 ssigmaS         = 0.02;    % desviación estándar
 
+lambda0         = 5;        % coeficiente base de apalancamiento  
+alpha           = 2;        % sensibilidad del apalancamiento al riesgo s_t  
+
+
+% Aggregate shocks
+ssigmaM 	    = .0025;							% SD of monetary policy shock
+rrhoM			= .5;							    % persistence of monetary policy shock
 
 
 %%%
