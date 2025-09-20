@@ -375,18 +375,26 @@ nextCapitalLeverage    = totalCapitalLeverage(2:end,:);
 currentCapitalDefault  = totalCapitalDefault(1:T,:);
 nextCapitalDefault     = totalCapitalDefault(2:end,:);
 
+currentCapitalInc = nansum(currentCapitalLeverage,2);
+nextCapitalInc    = nansum(nextCapitalLeverage,2);
+
+denomInc = max(currentCapitalInc,eps);
 denomLeverage = max(currentCapitalLeverage,eps);
 denomDefault  = max(currentCapitalDefault,eps);
 
+aggregateIKInc        = (nextCapitalInc - (1 - ddelta) * EOmegaTerm2 .* currentCapitalInc) ./ denomInc;
 mIKByLeverage         = (nextCapitalLeverage - (1 - ddelta) * EOmegaTerm2 * currentCapitalLeverage) ./ denomLeverage;
 mIKByDefaultDistance  = (nextCapitalDefault - (1 - ddelta) * EOmegaTerm2 * currentCapitalDefault) ./ denomDefault;
 
+aggregateIKInc(~isfinite(aggregateIKInc))                       = NaN;
 mIKByLeverage(~isfinite(mIKByLeverage))                       = NaN;
 mIKByDefaultDistance(~isfinite(mIKByDefaultDistance))         = NaN;
 
+zeroCapitalInc      = (denomInc      <= eps);
 zeroCapitalLeverage = (denomLeverage <= eps);
 zeroCapitalDefault  = (denomDefault  <= eps);
 
+aggregateIKInc(zeroCapitalInc)                     = NaN;
 mIKByLeverage(zeroCapitalLeverage)           = NaN;
 mIKByDefaultDistance(zeroCapitalDefault)     = NaN;
 
@@ -398,12 +406,10 @@ ikDeviationDefaultDistance = 100 * (mIKByDefaultDistance - ikBaseline);
 ikDeviationLeverage(~isfinite(ikDeviationLeverage))                       = 0;
 ikDeviationDefaultDistance(~isfinite(ikDeviationDefaultDistance))         = 0;
 
-aggregateIK    = vAggregateInvestment(1:T,1) ./ vAggregateCapital(1:T,1);
-
-irfIKLowLev    = 100 * (mIKByLeverage(:,1) ./ aggregateIK - 1);
-irfIKHighLev   = 100 * (mIKByLeverage(:,2) ./ aggregateIK - 1);
-irfIKCloseDef  = 100 * (mIKByDefaultDistance(:,1) ./ aggregateIK - 1);
-irfIKFarDef    = 100 * (mIKByDefaultDistance(:,2) ./ aggregateIK - 1);
+irfIKLowLev    = 100 * (mIKByLeverage(:,1) ./ aggregateIKInc - 1);
+irfIKHighLev   = 100 * (mIKByLeverage(:,2) ./ aggregateIKInc - 1);
+irfIKCloseDef  = 100 * (mIKByDefaultDistance(:,1) ./ aggregateIKInc - 1);
+irfIKFarDef    = 100 * (mIKByDefaultDistance(:,2) ./ aggregateIKInc - 1);
 
 figure
 
@@ -421,7 +427,7 @@ h        = legend('Bajo apalancamiento','Alto apalancamiento');
 set(h,'interpreter','latex','location','southwest','fontsize',14)
 set(gcf,'color','w')
 xlabel('Trimestres','interpreter','latex')
-ylabel('Desviacion inv./capital (\% vs. promedio agregado)','interpreter','latex')
+ylabel('Desviacion inv./capital (\% vs. promedio incumbentes)','interpreter','latex')
 grid on
 title('Canal de apalancamiento','interpreter','latex','fontsize',14)
 hold off
@@ -436,7 +442,7 @@ h        = legend('Lejos del default','Cerca del default');
 set(h,'interpreter','latex','location','southwest','fontsize',14)
 set(gcf,'color','w')
 xlabel('Trimestres','interpreter','latex')
-ylabel('Desviacion inv./capital (\% vs. promedio agregado)','interpreter','latex')
+ylabel('Desviacion inv./capital (\% vs. promedio incumbentes)','interpreter','latex')
 grid on
 title('Canal distancia al default','interpreter','latex','fontsize',14)
 hold off
