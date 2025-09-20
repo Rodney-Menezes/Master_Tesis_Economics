@@ -932,6 +932,10 @@ res_dd_size <- map(0:12, function(h) {
       " ~ ", paste(rhs_terms, collapse = " + "),
       " | name + sec + dateq"
     )),
+    data    = df_dyn13,
+    cluster = ~ Country + dateq + name
+  )
+})
 
 # 5) Extraer coeficientes y errores
 # ----------------------------------
@@ -983,4 +987,4 @@ p13c <- ggplot(dd_size_coefs, aes(x = horizon, y = beta_dd)) +
 (p13a / p13b / p13c) +
   plot_annotation(
     title = "Figura 6: Heterogeneidad conjunta de la posición Financiera y tamaño en la dinamica de la inversion"
-  )
+)
