@@ -173,7 +173,7 @@ build_cum_future_sums <- function(df, var, horizons, id_var = "name", time_var =
 }
 
 run_lp_series <- function(df,
-                          horizons,
+                          horizons = NULL,
                           shock_term,
                           controls = character(),
                           fe_terms = c("name", "sec", "dateq"),
@@ -182,6 +182,28 @@ run_lp_series <- function(df,
                           dep_var_suffix = "_dlog_capital",
                           specification,
                           sample_tpre) {
+  if (is.null(horizons)) {
+    horizon_pattern <- paste0("^", dep_var_prefix, "(\\\d+)", dep_var_suffix, "$")
+    horizon_matches <- stringr::str_match(names(df), horizon_pattern)
+    valid_matches <- !is.na(horizon_matches[, 2])
+    
+    if (!any(valid_matches)) {
+      stop(
+        sprintf(
+          paste0(
+            "Unable to infer horizons automatically. ",
+            "Ensure columns following the pattern '%s{h}%s' exist or provide `horizons`."
+          ),
+          dep_var_prefix,
+          dep_var_suffix
+        ),
+        call. = FALSE
+      )
+    }
+    
+    horizons <- sort(unique(as.integer(horizon_matches[valid_matches, 2])))
+  }
+
   fe_avail <- intersect(fe_terms, names(df))
   fe_string <- if (length(fe_avail) == 0) {
     "0"
@@ -422,6 +444,7 @@ all_results <- purrr::map(panel_files, function(file_path) {
 
   res_dd_nocy <- run_lp_series(
     df = df_panel,
+    horizons = horizons,
     shock_term = "d2d_shock",
     controls = controls_vec_nocy,
     specification = "hetero_distance",
