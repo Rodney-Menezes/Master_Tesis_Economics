@@ -224,7 +224,7 @@ run_lp_series <- function(df,
                           horizons = NULL,
                           shock_term,
                           controls = character(),
-                          fe_terms = c("name", "sec", "dateq"),
+                          fe_terms = character(),
                           cluster_terms = c("Country", "dateq", "name"),
                           dep_var_prefix = "cumF",
                           dep_var_suffix = "_dlog_capital",
@@ -252,33 +252,13 @@ run_lp_series <- function(df,
     horizons <- sort(unique(as.integer(horizon_matches[valid_matches, 2])))
   }
 
-  fe_avail <- intersect(fe_terms, names(df))
-
-  if (
-    identical(shock_term, "shock_exp") &&
-    "Country" %in% names(df) &&
-    dplyr::n_distinct(df$Country) == 1 &&
-    "dateq" %in% fe_avail
-  ) {
-    fe_avail <- setdiff(fe_avail, "dateq")
-    fe_desc <- if (length(fe_avail) == 0) {
-      "no fixed effects"
-    } else {
-      paste(fe_avail, collapse = " + ")
-    }
+  if (!is.null(fe_terms) && length(fe_terms) > 0) {
     message(
       sprintf(
-        "Relaxing fixed effects for '%s' in single-country sample; using %s.",
-        shock_term,
-        fe_desc
+        "Fixed effects are disabled for the local projections; ignoring fe_terms = %s.",
+        paste(fe_terms, collapse = ", ")
       )
     )
-  }
-
-  fe_string <- if (length(fe_avail) == 0) {
-    "0"
-  } else {
-    paste(fe_avail, collapse = " + ")
   }
 
   cluster_avail <- intersect(cluster_terms, names(df))
@@ -303,7 +283,7 @@ run_lp_series <- function(df,
     }
   
     rhs <- paste(regressors, collapse = " + ")
-    fml <- stats::as.formula(paste0(dep_var, " ~ ", rhs, " | ", fe_string))
+    fml <- stats::as.formula(paste0(dep_var, " ~ ", rhs))
 
     est <- tryCatch(
       fixest::feols(fml, data = df, cluster = cluster_formula),
