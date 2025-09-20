@@ -21,6 +21,117 @@ vAggregateMass               = ones(T+1,1);
 
 
 %----------------------------------------------------------------
+% Pre-compute heterogeneity groupings and steady state benchmarks
+%----------------------------------------------------------------
+
+% Evaluate steady state policy functions on the distribution grid
+vCapitalPrimeDistSS   = interpn(mProdGrid,mCashGrid,mCapitalPrimeSS,
+                        mStateGridDist(:,1),mStateGridDist(:,2));
+vDebtPrimeDistSS      = interpn(mProdGrid,mCashGrid,mDebtPrimeSS,
+                        mStateGridDist(:,1),mStateGridDist(:,2));
+
+% Steady state leverage and distance to default
+vLeverageSS           = vDebtPrimeDistSS ./ max(k0,vCapitalPrimeDistSS);
+mDefaultCutoffDistSS  = repmat(vDefaultCutoffSS,[1 nCashDist]);
+vDistanceDefaultSS    = mStateGridDist(:,2) - mDefaultCutoffDistSS(:);
+
+% Weights used to compute steady state moments (continuing incumbents)
+vWeightsSS            = vDistContContinueSS .* mDistributionSS(:);
+if sum(vWeightsSS) == 0
+    vWeightsSS        = ones(size(vWeightsSS));
+end
+vWeightsSS            = vWeightsSS ./ sum(vWeightsSS);
+
+% Helper to compute weighted medians
+[~,idxSortLev]        = sort(vLeverageSS);
+cumWeightsLev         = cumsum(vWeightsSS(idxSortLev));
+idxMedianLev          = find(cumWeightsLev >= 0.5,1,'first');
+if isempty(idxMedianLev)
+    idxMedianLev      = length(idxSortLev);
+end
+levThreshold          = vLeverageSS(idxSortLev(idxMedianLev));
+
+[~,idxSortDist]       = sort(vDistanceDefaultSS);
+cumWeightsDist        = cumsum(vWeightsSS(idxSortDist));
+idxMedianDist         = find(cumWeightsDist >= 0.5,1,'first');
+if isempty(idxMedianDist)
+    idxMedianDist     = length(idxSortDist);
+end
+distThreshold         = vDistanceDefaultSS(idxSortDist(idxMedianDist));
+
+% Indicator vectors for each group
+vGroupLeverageLow     = (vLeverageSS <= levThreshold);
+vGroupLeverageHigh    = (vLeverageSS >  levThreshold);
+if sum(vWeightsSS .* vGroupLeverageHigh) == 0
+    vGroupLeverageHigh= (vLeverageSS >= levThreshold);
+end
+if sum(vWeightsSS .* vGroupLeverageLow) == 0
+    vGroupLeverageLow = (vLeverageSS < levThreshold);
+end
+if sum(vWeightsSS .* vGroupLeverageHigh) == 0
+    vGroupLeverageHigh(idxSortLev(end)) = true;
+end
+if sum(vWeightsSS .* vGroupLeverageLow) == 0
+    vGroupLeverageLow(idxSortLev(1)) = true;
+end
+
+vGroupDistanceClose   = (vDistanceDefaultSS <= distThreshold);
+vGroupDistanceFar     = (vDistanceDefaultSS >  distThreshold);
+if sum(vWeightsSS .* vGroupDistanceFar) == 0
+    vGroupDistanceFar = (vDistanceDefaultSS >= distThreshold);
+end
+if sum(vWeightsSS .* vGroupDistanceClose) == 0
+    vGroupDistanceClose = (vDistanceDefaultSS < distThreshold);
+end
+if sum(vWeightsSS .* vGroupDistanceFar) == 0
+    vGroupDistanceFar(idxSortDist(end)) = true;
+end
+if sum(vWeightsSS .* vGroupDistanceClose) == 0
+    vGroupDistanceClose(idxSortDist(1)) = true;
+end
+
+vGroupLeverageLow     = double(vGroupLeverageLow);
+vGroupLeverageHigh    = double(vGroupLeverageHigh);
+vGroupDistanceClose   = double(vGroupDistanceClose);
+vGroupDistanceFar     = double(vGroupDistanceFar);
+
+% Steady state averages for each group
+massLeverageLowSS     = sum(vWeightsSS .* vGroupLeverageLow);
+massLeverageHighSS    = sum(vWeightsSS .* vGroupLeverageHigh);
+massDistanceCloseSS   = sum(vWeightsSS .* vGroupDistanceClose);
+massDistanceFarSS     = sum(vWeightsSS .* vGroupDistanceFar);
+
+vCapitalByLeverageSS              = zeros(1,2);
+vCapitalByDefaultDistanceSS       = zeros(1,2);
+if massLeverageLowSS > 0
+    vCapitalByLeverageSS(1,1)     = sum(vCapitalPrimeDistSS .* vWeightsSS .* vGroupLeverageLow) / massLeverageLowSS;
+else
+    vCapitalByLeverageSS(1,1)     = NaN;
+end
+if massLeverageHighSS > 0
+    vCapitalByLeverageSS(1,2)     = sum(vCapitalPrimeDistSS .* vWeightsSS .* vGroupLeverageHigh) / massLeverageHighSS;
+else
+    vCapitalByLeverageSS(1,2)     = NaN;
+end
+if massDistanceCloseSS > 0
+    vCapitalByDefaultDistanceSS(1,1) = sum(vCapitalPrimeDistSS .* vWeightsSS .* vGroupDistanceClose) / massDistanceCloseSS;
+else
+    vCapitalByDefaultDistanceSS(1,1) = NaN;
+end
+if massDistanceFarSS > 0
+    vCapitalByDefaultDistanceSS(1,2) = sum(vCapitalPrimeDistSS .* vWeightsSS .* vGroupDistanceFar) / massDistanceFarSS;
+else
+    vCapitalByDefaultDistanceSS(1,2) = NaN;
+end
+
+% Preallocate time series for heterogeneity analysis
+mCapitalByLeverage                = NaN(T,2);
+mMassByLeverage                   = NaN(T,2);
+mCapitalByDefaultDistance         = NaN(T,2);
+mMassByDefaultDistance            = NaN(T,2);
+
+
+%----------------------------------------------------------------
 % Compute the path of objects
 %----------------------------------------------------------------
 
@@ -187,6 +298,36 @@ for t = 1 : T
     mDebtPrimeDist      = reshape(vDebtPrimeDist,nProd,nCashDist);
 
 
+    %%%
+    % Heterogeneity: average capital by leverage and default distance
+    %%%
+
+    vWeightsCurrent     = mDistribution(:) .* vDistContContinue;
+
+    massLowLev          = sum(vWeightsCurrent .* vGroupLeverageLow);
+    massHighLev         = sum(vWeightsCurrent .* vGroupLeverageHigh);
+    massCloseDefault    = sum(vWeightsCurrent .* vGroupDistanceClose);
+    massFarDefault      = sum(vWeightsCurrent .* vGroupDistanceFar);
+
+    mMassByLeverage(t,1)            = massLowLev;
+    mMassByLeverage(t,2)            = massHighLev;
+    mMassByDefaultDistance(t,1)     = massCloseDefault;
+    mMassByDefaultDistance(t,2)     = massFarDefault;
+
+    if massLowLev > 0
+        mCapitalByLeverage(t,1)     = sum(vCapitalPrimeDist .* vWeightsCurrent .* vGroupLeverageLow) / massLowLev;
+    end
+    if massHighLev > 0
+        mCapitalByLeverage(t,2)     = sum(vCapitalPrimeDist .* vWeightsCurrent .* vGroupLeverageHigh) / massHighLev;
+    end
+    if massCloseDefault > 0
+        mCapitalByDefaultDistance(t,1) = sum(vCapitalPrimeDist .* vWeightsCurrent .* vGroupDistanceClose) / massCloseDefault;
+    end
+    if massFarDefault > 0
+        mCapitalByDefaultDistance(t,2) = sum(vCapitalPrimeDist .* vWeightsCurrent .* vGroupDistanceFar) / massFarDefault;
+    end
+
+   
     %%%
     % Aggregate Capital
     %%%
