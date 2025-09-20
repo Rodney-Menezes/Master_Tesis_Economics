@@ -25,9 +25,9 @@ vAggregateMass               = ones(T+1,1);
 %----------------------------------------------------------------
 
 % Evaluate steady state policy functions on the distribution grid
-vCapitalPrimeDistSS   = interpn(mProdGrid,mCashGrid,mCapitalPrimeSS,
+vCapitalPrimeDistSS   = interpn(mProdGrid,mCashGrid,mCapitalPrimeSS,...
                         mStateGridDist(:,1),mStateGridDist(:,2));
-vDebtPrimeDistSS      = interpn(mProdGrid,mCashGrid,mDebtPrimeSS,
+vDebtPrimeDistSS      = interpn(mProdGrid,mCashGrid,mDebtPrimeSS,...
                         mStateGridDist(:,1),mStateGridDist(:,2));
 
 % Steady state leverage and distance to default
