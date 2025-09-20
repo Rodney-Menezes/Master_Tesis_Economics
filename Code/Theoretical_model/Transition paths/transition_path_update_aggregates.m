@@ -124,11 +124,30 @@ else
     vCapitalByDefaultDistanceSS(1,2) = NaN;
 end
 
+% Average leverage and distance to default in steady state
+vLeverageByLeverageSS             = NaN(1,2);
+if massLeverageLowSS > 0
+    vLeverageByLeverageSS(1,1)    = sum(vLeverageSS .* vWeightsSS .* vGroupLeverageLow) / massLeverageLowSS;
+end
+if massLeverageHighSS > 0
+    vLeverageByLeverageSS(1,2)    = sum(vLeverageSS .* vWeightsSS .* vGroupLeverageHigh) / massLeverageHighSS;
+end
+
+vDistanceByDefaultDistanceSS      = NaN(1,2);
+if massDistanceCloseSS > 0
+    vDistanceByDefaultDistanceSS(1,1) = sum(vDistanceDefaultSS .* vWeightsSS .* vGroupDistanceClose) / massDistanceCloseSS;
+end
+if massDistanceFarSS > 0
+    vDistanceByDefaultDistanceSS(1,2) = sum(vDistanceDefaultSS .* vWeightsSS .* vGroupDistanceFar) / massDistanceFarSS;
+end
+
 % Preallocate time series for heterogeneity analysis
 mCapitalByLeverage                = NaN(T,2);
 mMassByLeverage                   = NaN(T,2);
 mCapitalByDefaultDistance         = NaN(T,2);
 mMassByDefaultDistance            = NaN(T,2);
+mLeverageByLeverage               = NaN(T,2);
+mDistanceByDefaultDistance        = NaN(T,2);
 
 
 %----------------------------------------------------------------
@@ -283,8 +302,8 @@ for t = 1 : T
     mCapitalPrime       = reshape(mCapitalPrimeSeries(:,t),nProd,nCash);
     mDebtPrime          = reshape(mDebtPrimeSeries(:,t),nProd,nCash);
 
-    vDistContContinue   = (mStateGridDist(:,2) >= reshape(repmat(mDefaultCutoffSeries(:,t),...
-                          [1 nCashDist]),nStateDist,1));
+    vDefaultCutoffCurrent = reshape(repmat(mDefaultCutoffSeries(:,t),[1 nCashDist]),nStateDist,1);
+    vDistContContinue   = (mStateGridDist(:,2) >= vDefaultCutoffCurrent);
     vContinue           = ppiExit * (mStateGridDist(:,2) >= 0) + (1 - ppiExit) * vDistContContinue;
 
     % Capital accumulation policy
@@ -327,7 +346,36 @@ for t = 1 : T
         mCapitalByDefaultDistance(t,2) = sum(vCapitalPrimeDist .* vWeightsCurrent .* vGroupDistanceFar) / massFarDefault;
     end
 
-   
+    % Average leverage and distance to default along the transition
+    leverageValues             = vDebtPrimeDist ./ max(k0,vCapitalPrimeDist);
+    distanceValues             = mStateGridDist(:,2) - vDefaultCutoffCurrent;
+
+    validLeverage              = isfinite(leverageValues);
+    validDistance              = isfinite(distanceValues);
+
+    weightsLowLev              = vWeightsCurrent .* vGroupLeverageLow;
+    weightsHighLev             = vWeightsCurrent .* vGroupLeverageHigh;
+    weightsCloseDefault        = vWeightsCurrent .* vGroupDistanceClose;
+    weightsFarDefault          = vWeightsCurrent .* vGroupDistanceFar;
+
+    if sum(weightsLowLev(validLeverage)) > 0
+        mLeverageByLeverage(t,1) = sum(leverageValues(validLeverage) .* weightsLowLev(validLeverage)) / ...
+                                   sum(weightsLowLev(validLeverage));
+    end
+    if sum(weightsHighLev(validLeverage)) > 0
+        mLeverageByLeverage(t,2) = sum(leverageValues(validLeverage) .* weightsHighLev(validLeverage)) / ...
+                                    sum(weightsHighLev(validLeverage));
+    end
+    if sum(weightsCloseDefault(validDistance)) > 0
+        mDistanceByDefaultDistance(t,1) = sum(distanceValues(validDistance) .* weightsCloseDefault(validDistance)) / ...
+                                          sum(weightsCloseDefault(validDistance));
+    end
+    if sum(weightsFarDefault(validDistance)) > 0
+        mDistanceByDefaultDistance(t,2) = sum(distanceValues(validDistance) .* weightsFarDefault(validDistance)) / ...
+                                          sum(weightsFarDefault(validDistance));
+    end
+
+
     %%%
     % Aggregate Capital
     %%%
