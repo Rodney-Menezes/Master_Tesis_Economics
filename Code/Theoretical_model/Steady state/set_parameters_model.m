@@ -49,7 +49,7 @@ rrhoProd    = 0.90;
 % Heterogeneous production firms
 ttheta 			 = .21;								% capital coefficient
 nnu 			 = .67;								% labor coefficient
-ddelta           = .025;							% capital depreciation rate
+ddelta           = .25;							% capital depreciation rate
 
 % Firm lifecycle
 ppiExit          = (.1) / (4);			 % exogenous exit rate (quarterly); hit 8.7% annual exit rate given a 3% annual default rate. 
