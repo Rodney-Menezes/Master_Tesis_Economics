@@ -361,11 +361,19 @@ print('../Results/rep_firm_comparison.eps','-depsc')
 
 capitalSeriesLeverage  = [vCapitalByLeverageSS; mCapitalByLeverage(1:T,:)];
 capitalSeriesDefault   = [vCapitalByDefaultDistanceSS; mCapitalByDefaultDistance(1:T,:)];
+massSeriesLeverage     = [massLeverageLowSS massLeverageHighSS; mMassByLeverage(1:T,:)];
+massSeriesDefault      = [massDistanceCloseSS massDistanceFarSS; mMassByDefaultDistance(1:T,:)];
 
-currentCapitalLeverage = capitalSeriesLeverage(1:T,:);
-nextCapitalLeverage    = capitalSeriesLeverage(2:end,:);
-currentCapitalDefault  = capitalSeriesDefault(1:T,:);
-nextCapitalDefault     = capitalSeriesDefault(2:end,:);
+totalCapitalLeverage   = capitalSeriesLeverage .* massSeriesLeverage;
+totalCapitalDefault    = capitalSeriesDefault .* massSeriesDefault;
+
+totalCapitalLeverage(~isfinite(totalCapitalLeverage))   = 0;
+totalCapitalDefault(~isfinite(totalCapitalDefault))     = 0;
+
+currentCapitalLeverage = totalCapitalLeverage(1:T,:);
+nextCapitalLeverage    = totalCapitalLeverage(2:end,:);
+currentCapitalDefault  = totalCapitalDefault(1:T,:);
+nextCapitalDefault     = totalCapitalDefault(2:end,:);
 
 denomLeverage = max(currentCapitalLeverage,eps);
 denomDefault  = max(currentCapitalDefault,eps);
@@ -375,6 +383,12 @@ mIKByDefaultDistance  = (nextCapitalDefault - (1 - ddelta) * EOmegaTerm2 * curre
 
 mIKByLeverage(~isfinite(mIKByLeverage))                       = NaN;
 mIKByDefaultDistance(~isfinite(mIKByDefaultDistance))         = NaN;
+
+zeroCapitalLeverage = (denomLeverage <= eps);
+zeroCapitalDefault  = (denomDefault  <= eps);
+
+mIKByLeverage(zeroCapitalLeverage)           = NaN;
+mIKByDefaultDistance(zeroCapitalDefault)     = NaN;
 
 ikBaseline = 1 - (1 - ddelta) * EOmegaTerm2;
 
@@ -422,10 +436,11 @@ hold off
 print('../Results/heterogeneity_channels.eps','-depsc')
 
 validLeverage      = ~isnan(mIKByLeverage);
-weightedNumerator  = sum((mMassByLeverage .* mIKByLeverage) .* validLeverage,2);
-weightedDenominator= sum((mMassByLeverage .* validLeverage),2);
-avgIKSeries        = weightedNumerator ./ weightedDenominator;
-avgIKSeries(weightedDenominator == 0) = NaN;
+netInvestmentLev   = nextCapitalLeverage - (1 - ddelta) * EOmegaTerm2 * currentCapitalLeverage;
+totalCapitalLevRaw = sum(currentCapitalLeverage .* validLeverage,2);
+totalCapitalLev    = max(totalCapitalLevRaw,eps);
+avgIKSeries        = sum(netInvestmentLev .* validLeverage,2) ./ totalCapitalLev;
+avgIKSeries(totalCapitalLevRaw == 0) = NaN;
 
 irfIKAverage       = 100 * (avgIKSeries / ikBaseline - 1);
 
