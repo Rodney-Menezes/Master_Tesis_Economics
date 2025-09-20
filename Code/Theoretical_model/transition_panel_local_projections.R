@@ -183,7 +183,7 @@ run_lp_series <- function(df,
                           specification,
                           sample_tpre) {
   if (is.null(horizons)) {
-    horizon_pattern <- paste0("^", dep_var_prefix, "(\\\d+)", dep_var_suffix, "$")
+    horizon_pattern <- paste0("^", dep_var_prefix, "(\\d+)", dep_var_suffix, "$")
     horizon_matches <- stringr::str_match(names(df), horizon_pattern)
     valid_matches <- !is.na(horizon_matches[, 2])
     
