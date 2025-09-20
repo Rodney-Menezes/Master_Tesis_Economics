@@ -118,7 +118,7 @@ run_local_projection <- function(df, interaction_col, horizon) {
   }
 
   model <- fixest::feols(
-    formula = response ~ interaction,
+    fml = response ~ interaction,
     data = reg_data,
     fixef = ~firm_id + quarter_id,
     cluster = ~firm_id
