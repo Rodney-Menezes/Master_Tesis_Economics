@@ -87,23 +87,71 @@ winsorize <- function(x, p = 0.005) {
 prep_fin_vars <- function(df, p = 0.005, country_var = "Country", firm_var = "name") {
   stopifnot(all(c("leverage", "dd") %in% names(df)))
 
-  df %>%
+  df <- df %>%
     dplyr::ungroup() %>%
     dplyr::group_by(.data[[country_var]]) %>%
     dplyr::mutate(
       leverage_win = winsorize(leverage, p = p),
       dd_win = winsorize(dd, p = p)
     ) %>%
-    dplyr::ungroup() %>%
+    dplyr::ungroup()
+  
+  lev_panel_mean <- mean(df$leverage_win, na.rm = TRUE)
+  dd_panel_mean <- mean(df$dd_win, na.rm = TRUE)
+  
+  if (is.na(lev_panel_mean)) {
+    lev_panel_mean <- 0
+  }
+  if (is.na(dd_panel_mean)) {
+    dd_panel_mean <- 0
+  }
+  
+  df %>%
     dplyr::group_by(.data[[firm_var]]) %>%
     dplyr::arrange(dateq, .by_group = TRUE) %>%
     dplyr::mutate(
       lev_dm = leverage_win - mean(leverage_win, na.rm = TRUE),
       dd_dm = dd_win - mean(dd_win, na.rm = TRUE),
+      lev_bw = leverage_win - lev_panel_mean,
+      dd_bw = dd_win - dd_panel_mean,
       L1_lev_dm = dplyr::lag(lev_dm, 1),
-      L1_dd_dm = dplyr::lag(dd_dm, 1)
+      L1_dd_dm = dplyr::lag(dd_dm, 1),
+      L1_lev_bw = dplyr::lag(lev_bw, 1),
+      L1_dd_bw = dplyr::lag(dd_bw, 1),
+      L1_leverage_win = dplyr::lag(leverage_win, 1),
+      L1_dd_win = dplyr::lag(dd_win, 1)
     ) %>%
     dplyr::ungroup()
+}
+
+select_heterogeneity_term <- function(df, candidates, min_sd = 1e-08, verbose = TRUE) {
+  available <- intersect(candidates, names(df))
+  if (length(available) == 0) {
+    stop(sprintf(
+      "None of the candidate heterogeneity terms are present in the data: %s",
+      paste(candidates, collapse = ", ")
+    ))
+  }
+  
+  primary <- available[1]
+  for (col in available) {
+    sd_val <- stats::sd(df[[col]], na.rm = TRUE)
+    if (!is.na(sd_val) && sd_val > min_sd) {
+      if (verbose && col != primary) {
+        message(sprintf("Using '%s' as heterogeneity term instead of '%s'.", col, primary))
+      }
+      return(df[[col]])
+    }
+  }
+  
+  if (verbose) {
+    warning(sprintf(
+      "All candidate heterogeneity variables have near-zero variation: %s",
+      paste(available, collapse = ", ")
+    ))
+  }
+  
+  df[[primary]]
 }
 
 prep_shock_var <- function(df, shock_col = "shock", p = 0.005, country_var = "Country") {
@@ -237,10 +285,18 @@ run_lp_series <- function(df,
 
     est <- tryCatch(
       fixest::feols(fml, data = df, cluster = cluster_formula),
-      error = function(e) NULL
+      error = function(e) {
+        warning(sprintf(
+          "Local projection failed to converge for horizon %d in spec '%s': %s",
+          h,
+          specification,
+          conditionMessage(e)
+        ))
+        NULL
+      }
     )
 
-    if (is.null(est) || !shock_term %in% names(coef(est))) {
+    if (is.null(est)) {
       tibble(
         horizon = h,
         term = shock_term,
@@ -250,7 +306,27 @@ run_lp_series <- function(df,
         p_value = NA_real_,
         conf_low = NA_real_,
         conf_high = NA_real_,
-        n_obs = if (is.null(est)) NA_integer_ else stats::nobs(est),
+        n_obs = NA_integer_,
+        specification = specification,
+        sample_tpre = sample_tpre
+      )
+    } else if (!shock_term %in% names(coef(est))) {
+      warning(sprintf(
+        "The term '%s' was dropped due to collinearity at horizon %d in spec '%s'.",
+        shock_term,
+        h,
+        specification
+      ))
+      tibble(
+        horizon = h,
+        term = shock_term,
+        estimate = NA_real_,
+        std_error = NA_real_,
+        statistic = NA_real_,
+        p_value = NA_real_,
+        conf_low = NA_real_,
+        conf_high = NA_real_,
+        n_obs = stats::nobs(est),
         specification = specification,
         sample_tpre = sample_tpre
       )
@@ -421,10 +497,23 @@ all_results <- purrr::map(panel_files, function(file_path) {
     prep_ctrl_var(var_in = "investment_rate", prefix = "investment_rate", p = winsor_prob) %>%
     prep_ctrl_var(var_in = "cf_k", prefix = "cf_k", p = winsor_prob) %>%
     prep_ctrl_var(var_in = "cash_ratio", prefix = "cash_ratio", p = winsor_prob) %>%
-    add_lagged_controls(c("investment_rate_win", "cf_k_win", "cash_ratio_win")) %>%
+    add_lagged_controls(c("investment_rate_win", "cf_k_win", "cash_ratio_win"))
+  
+  lev_term <- select_heterogeneity_term(
+    df_panel,
+    candidates = c("L1_lev_dm", "L1_lev_bw", "L1_leverage_win")
+  )
+  dd_term <- select_heterogeneity_term(
+    df_panel,
+    candidates = c("L1_dd_dm", "L1_dd_bw", "L1_dd_win")
+  )
+  
+  df_panel <- df_panel %>%
     dplyr::mutate(
-      lev_shock = L1_lev_dm * shock_exp,
-      d2d_shock = L1_dd_dm * shock_exp
+      lev_interaction = lev_term,
+      d2d_interaction = dd_term,
+      lev_shock = lev_interaction * shock_exp,
+      d2d_shock = d2d_interaction * shock_exp
     )
 
   df_panel <- build_cum_future_sums(df_panel, "dlog_capital", horizons)
