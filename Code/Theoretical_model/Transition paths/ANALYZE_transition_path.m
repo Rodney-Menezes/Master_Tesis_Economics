@@ -435,30 +435,106 @@ hold off
 
 print('../Results/heterogeneity_channels.eps','-depsc')
 
-validLeverage      = ~isnan(mIKByLeverage);
-netInvestmentLev   = nextCapitalLeverage - (1 - ddelta) * EOmegaTerm2 * currentCapitalLeverage;
-totalCapitalLevRaw = sum(currentCapitalLeverage .* validLeverage,2);
-totalCapitalLev    = max(totalCapitalLevRaw,eps);
-avgIKSeries        = sum(netInvestmentLev .* validLeverage,2) ./ totalCapitalLev;
-avgIKSeries(totalCapitalLevRaw == 0) = NaN;
+%----------------------------------------------------------------
+% Interaction between investment and firm characteristics
+%----------------------------------------------------------------
 
-irfIKAverage       = 100 * (avgIKSeries / ikBaseline - 1);
+% Build series that include steady state benchmarks
+leverageSeriesFull          = [vLeverageByLeverageSS; mLeverageByLeverage(1:T,:)];
+distanceSeriesFull          = [vDistanceByDefaultDistanceSS; mDistanceByDefaultDistance(1:T,:)];
+massSeriesLeverageFull      = massSeriesLeverage;
+massSeriesDefaultFull       = massSeriesDefault;
+
+massCurrentLeverage         = massSeriesLeverageFull(1:T,:);
+massCurrentDefault          = massSeriesDefaultFull(1:T,:);
+leverageCurrent             = leverageSeriesFull(1:T,:);
+distanceCurrent             = distanceSeriesFull(1:T,:);
+
+interactionLevLevel         = NaN(T,1);
+interactionDistLevel        = NaN(T,1);
+
+for t = 1 : T
+
+        weightsLev  = massCurrentLeverage(t,:);
+        leverageRow = leverageCurrent(t,:);
+        ikRowLev    = mIKByLeverage(t,:);
+        validLev    = isfinite(weightsLev) & isfinite(leverageRow) & isfinite(ikRowLev);
+        weightLev   = sum(weightsLev(validLev));
+        if weightLev > 0
+                interactionLevLevel(t,1) = sum(weightsLev(validLev) .* leverageRow(validLev) .* ikRowLev(validLev)) / weightLev;
+        end
+
+        weightsDist  = massCurrentDefault(t,:);
+        distanceRow  = distanceCurrent(t,:);
+        ikRowDist    = mIKByDefaultDistance(t,:);
+        validDist    = isfinite(weightsDist) & isfinite(distanceRow) & isfinite(ikRowDist);
+        weightDist   = sum(weightsDist(validDist));
+        if weightDist > 0
+                interactionDistLevel(t,1) = sum(weightsDist(validDist) .* distanceRow(validDist) .* ikRowDist(validDist)) / weightDist;
+        end
+
+end
+
+massBaselineLeverage        = massSeriesLeverageFull(1,:);
+leverageBaseline            = leverageSeriesFull(1,:);
+validBaselineLeverage       = isfinite(massBaselineLeverage) & isfinite(leverageBaseline);
+weightBaselineLeverage      = sum(massBaselineLeverage(validBaselineLeverage));
+if weightBaselineLeverage > 0
+        baselineInteractionLeverage = ikBaseline * sum(massBaselineLeverage(validBaselineLeverage) .* leverageBaseline(validBaselineLeverage)) / ...
+                                      weightBaselineLeverage;
+else
+        baselineInteractionLeverage = NaN;
+end
+
+massBaselineDefault         = massSeriesDefaultFull(1,:);
+distanceBaseline            = distanceSeriesFull(1,:);
+validBaselineDefault        = isfinite(massBaselineDefault) & isfinite(distanceBaseline);
+weightBaselineDefault       = sum(massBaselineDefault(validBaselineDefault));
+if weightBaselineDefault > 0
+        baselineInteractionDefault = ikBaseline * sum(massBaselineDefault(validBaselineDefault) .* distanceBaseline(validBaselineDefault)) / ...
+                                      weightBaselineDefault;
+else
+        baselineInteractionDefault = NaN;
+end
+
+interactionLevIRF           = NaN(T,1);
+interactionDistIRF          = NaN(T,1);
+
+if isfinite(baselineInteractionLeverage) && abs(baselineInteractionLeverage) > eps
+        interactionLevIRF   = 100 * (interactionLevLevel / baselineInteractionLeverage - 1);
+end
+if isfinite(baselineInteractionDefault) && abs(baselineInteractionDefault) > eps
+        interactionDistIRF  = 100 * (interactionDistLevel / baselineInteractionDefault - 1);
+end
 
 figure
 
 h               = gcf;
 h.PaperUnits    = 'inches';
-h.PaperPosition = [0 0 6.5 4];
+h.PaperPosition = [0 0 13 4];
 
+subplot(1,2,1)
 hold on
-plot(vTime,irfIKAverage,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
+plot(vTime,interactionLevIRF,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
 plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
 xlim([1 12])
 set(gcf,'color','w')
 xlabel('Quarters','interpreter','latex')
 ylabel('$\%$ deviation','interpreter','latex')
 grid on
-title('Average investment rate (I/K)','interpreter','latex','fontsize',14)
+title('Interaction: Investment $\times$ leverage','interpreter','latex','fontsize',14)
+hold off
+
+subplot(1,2,2)
+hold on
+plot(vTime,interactionDistIRF,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
+plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
+xlim([1 12])
+set(gcf,'color','w')
+xlabel('Quarters','interpreter','latex')
+ylabel('$\%$ deviation','interpreter','latex')
+grid on
+title('Interaction: Investment $\times$ distance to default','interpreter','latex','fontsize',14)
 hold off
 
 print('../Results/heterogeneity_channels_average.eps','-depsc')
