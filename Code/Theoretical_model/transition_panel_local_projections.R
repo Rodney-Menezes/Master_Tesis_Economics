@@ -253,6 +253,28 @@ run_lp_series <- function(df,
   }
 
   fe_avail <- intersect(fe_terms, names(df))
+
+  if (
+    identical(shock_term, "shock_exp") &&
+    "Country" %in% names(df) &&
+    dplyr::n_distinct(df$Country) == 1 &&
+    "dateq" %in% fe_avail
+  ) {
+    fe_avail <- setdiff(fe_avail, "dateq")
+    fe_desc <- if (length(fe_avail) == 0) {
+      "no fixed effects"
+    } else {
+      paste(fe_avail, collapse = " + ")
+    }
+    message(
+      sprintf(
+        "Relaxing fixed effects for '%s' in single-country sample; using %s.",
+        shock_term,
+        fe_desc
+      )
+    )
+  }
+
   fe_string <- if (length(fe_avail) == 0) {
     "0"
   } else {
