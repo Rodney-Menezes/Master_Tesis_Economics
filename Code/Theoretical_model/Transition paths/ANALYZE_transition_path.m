@@ -398,10 +398,10 @@ ikDeviationDefaultDistance = 100 * (mIKByDefaultDistance - ikBaseline);
 ikDeviationLeverage(~isfinite(ikDeviationLeverage))                       = 0;
 ikDeviationDefaultDistance(~isfinite(ikDeviationDefaultDistance))         = 0;
 
-irfIKLowLev    = cumsum(ikDeviationLeverage(:,1));
-irfIKHighLev   = cumsum(ikDeviationLeverage(:,2));
-irfIKCloseDef  = cumsum(ikDeviationDefaultDistance(:,1));
-irfIKFarDef    = cumsum(ikDeviationDefaultDistance(:,2));
+irfIKLowLev    = 100 * (mIKByLeverage(:,1) ./ ikBaseline - 1);
+irfIKHighLev   = 100 * (mIKByLeverage(:,2) ./ ikBaseline - 1);
+irfIKCloseDef  = 100 * (mIKByDefaultDistance(:,1) ./ ikBaseline - 1);
+irfIKFarDef    = 100 * (mIKByDefaultDistance(:,2) ./ ikBaseline - 1);
 
 figure
 
@@ -419,7 +419,7 @@ h        = legend('Bajo apalancamiento','Alto apalancamiento');
 set(h,'interpreter','latex','location','southwest','fontsize',14)
 set(gcf,'color','w')
 xlabel('Trimestres','interpreter','latex')
-ylabel('Variacion acumulada inv./capital (p.p. vs. linea base)','interpreter','latex')
+ylabel('Desviacion inv./capital (\% vs. linea base)','interpreter','latex')
 grid on
 title('Canal de apalancamiento','interpreter','latex','fontsize',14)
 hold off
@@ -434,7 +434,7 @@ h        = legend('Lejos del default','Cerca del default');
 set(h,'interpreter','latex','location','southwest','fontsize',14)
 set(gcf,'color','w')
 xlabel('Trimestres','interpreter','latex')
-ylabel('Variacion acumulada inv./capital (p.p. vs. linea base)','interpreter','latex')
+ylabel('Desviacion inv./capital (\% vs. linea base)','interpreter','latex')
 grid on
 title('Canal distancia al default','interpreter','latex','fontsize',14)
 hold off
