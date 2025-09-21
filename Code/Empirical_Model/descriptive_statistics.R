@@ -1,16 +1,6 @@
 # Script en R para replicar las Tablas 1–2 y la Figura del paper de Ottonello & Winberry (2020)
 # == Instalacion de Paquetes necesarios ==
 
-install.packages("haven")
-install.packages("dplyr")
-install.packages("zoo")
-install.packages("fixest")
-install.packages("mFilter")
-install.packages("xtable")
-install.packages("openxlsx")
-install.packages("tidyr")
-install.packages("ggplot2")
-
 # ===================================================
 # Script en R para replicar “descriptive_statistics.do”
 # Ottonello & Winberry (2020) adaptado a tu base
