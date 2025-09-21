@@ -25,7 +25,7 @@ suppressPackageStartupMessages({
 # Configuration
 # ------------------------------
 # Horizons for the local projections (in quarters)
-horizons <- 0:8
+horizons <- 0:12
 # Monetary shock profile (same as in the MATLAB/Do-file implementation)
 shock_length <- 12
 shock_size <- -0.0025
@@ -132,12 +132,33 @@ run_local_projection <- function(df, interaction_col, horizon) {
   ) %>%
     dplyr::filter(!is.na(response), !is.na(interaction))
   
-  if (nrow(reg_data) == 0) {
+  if (nrow(reg_data) < 2L) {
     return(tibble(
       horizon = horizon,
       coefficient = NA_real_,
       std_error = NA_real_,
-      n_obs = 0L
+      n_obs = nrow(reg_data)
+    ))
+  }
+  
+  interaction_varies_within_period <- reg_data %>%
+    dplyr::group_by(quarter_id) %>%
+    dplyr::summarise(n_unique = dplyr::n_distinct(interaction), .groups = "drop") %>%
+    dplyr::filter(n_unique > 1L) %>%
+    nrow() > 0L
+  
+  interaction_varies_within_firm <- reg_data %>%
+    dplyr::group_by(firm_id) %>%
+    dplyr::summarise(n_unique = dplyr::n_distinct(interaction), .groups = "drop") %>%
+    dplyr::filter(n_unique > 1L) %>%
+    nrow() > 0L
+  
+  if (!interaction_varies_within_period || !interaction_varies_within_firm) {
+    return(tibble(
+      horizon = horizon,
+      coefficient = NA_real_,
+      std_error = NA_real_,
+      n_obs = nrow(reg_data)
     ))
   }
 
