@@ -6,7 +6,7 @@ global nProd nCash nCapital nDebt nCashDist nCapitalDist nDebtDist vProdGrid mPr
 		prodMinMult prodMaxMult cashMinMult cashMaxMult capitalMinMult capitalMaxMult ...
 		debtMinMult debtMaxMult capitalMinDistMult cashPower capitalPower debtPower cashPowerDist ...
 		prodMin prodMax capitalMinDist T wageMin wageMax vProdGrid mProdTransition vProdErgodic ...
-		vOmegaGrid vOmegaWeights mShocksGrid omegaMin omegaMax nShocks nOmega mShocksTransition
+		vOmegaGrid vOmegaWeights mShocksGrid omegaMin omegaMax nShocks nOmega mShocksTransition lambda0 alpha
 
 
 %%%
@@ -117,3 +117,10 @@ tBurn					= tAnnual - 12;		% drop first 12 years, as in Cooper-Haltiwanger
 
 wageMin         = .8 * wRepSS;
 wageMax         = 1.05 * wRepSS;
+
+
+% ========== NUEVO: parámetros de la restricción financiera =========
+%%%
+lambda0         = 5;    % coeficiente base de apalancamiento (λ₀)
+alpha           = 2;    % sensibilidad del apalancamiento al riesgo soberano (α)
+%%% ====================================================================
