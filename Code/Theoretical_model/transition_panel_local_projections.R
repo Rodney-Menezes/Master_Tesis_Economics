@@ -17,6 +17,7 @@ suppressPackageStartupMessages({
   library(stringr)
   library(tibble)
   library(purrr)
+  library(ggplot2)
 })
 
 # ------------------------------
@@ -29,6 +30,30 @@ shock_length <- 12
 shock_size <- 0.0025
 shock_decay <- 0.5
 shock_scale <- -4  # flip sign and annualise
+
+# Directory that stores the simulated panels. The default points to the path
+# used on the author's machine, but it can be overridden by defining the
+# environment variable `TRANSITION_PANEL_DIR`.
+default_data_dir <- "C:/Users/joser/Documents"
+data_dir <- Sys.getenv("TRANSITION_PANEL_DIR", unset = default_data_dir)
+
+# Where to write the output files (CSV with coefficients and PNG plot). By
+# default the files are written to the current working directory, but the
+# behaviour can be customised via the environment variable
+# `TRANSITION_OUTPUT_DIR`.
+output_dir <- Sys.getenv("TRANSITION_OUTPUT_DIR", unset = getwd())
+
+if (!dir.exists(data_dir)) {
+  stop(
+    "The directory with the transition panels does not exist: ",
+    data_dir,
+    "\nUse Sys.setenv(TRANSITION_PANEL_DIR = 'path/to/panels') before running the script."
+  )
+}
+
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # ------------------------------
 # Helper functions
@@ -139,16 +164,21 @@ run_local_projection <- function(df, interaction_col, horizon) {
 # ------------------------------
 # Main execution
 # ------------------------------
-script_dir <- getwd()
 panel_files <- list.files(
-  path = script_dir,
+  path = data_dir,
   pattern = "^mTransitionPanel_\\d+\\.csv$",
   full.names = TRUE
 )
 
 if (length(panel_files) == 0) {
-  stop("No transition panel CSV files were found in the current directory.")
+  stop(
+    "No transition panel CSV files were found in ",
+    data_dir,
+    "."
+  )
 }
+
+message("Processing ", length(panel_files), " transition panel(s) from: ", data_dir)
 
 results <- purrr::map_dfr(panel_files, function(path) {
   t_pre <- parse_tpre(path)
@@ -164,6 +194,8 @@ results <- purrr::map_dfr(panel_files, function(path) {
       dd_shock = lag_dd_within * shock
     )
 
+  message("  • ", basename(path), " (t_pre = ", t_pre, ")")
+
   lev_results <- purrr::map_dfr(horizons, ~ run_local_projection(df, "lev_shock", .x)) %>%
     dplyr::mutate(measure = "leverage")
 
@@ -177,7 +209,93 @@ results <- purrr::map_dfr(panel_files, function(path) {
     )
 })
 
-output_path <- file.path(script_dir, "transition_panel_local_projections_simple.csv")
-readr::write_csv(results, output_path)
+weighted_mean_safe <- function(x, w) {
+  valid <- !is.na(x) & !is.na(w) & w > 0
+  if (!any(valid)) {
+    return(NA_real_)
+  }
+  sum(x[valid] * w[valid]) / sum(w[valid])
+}
 
-message("Local projection estimates saved to: ", output_path)
+summary_results <- results %>%
+  dplyr::filter(!is.na(coefficient)) %>%
+  dplyr::group_by(measure, horizon) %>%
+  dplyr::summarise(
+    coefficient = weighted_mean_safe(coefficient, n_obs),
+    std_error = sqrt(weighted_mean_safe(std_error^2, n_obs)),
+    n_obs = sum(n_obs, na.rm = TRUE),
+    n_panels = dplyr::n_distinct(panel_file),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    ci_low = coefficient - 1.96 * std_error,
+    ci_high = coefficient + 1.96 * std_error
+  )
+
+csv_path <- file.path(output_dir, "transition_panel_local_projections_simple.csv")
+plot_path <- file.path(output_dir, "transition_panel_local_projections_simple.png")
+
+readr::write_csv(results, csv_path)
+message("Local projection estimates saved to: ", csv_path)
+
+if (nrow(summary_results) == 0) {
+  message("No valid regression results were produced, skipping the plot.")
+} else {
+  measure_labels <- c(
+    leverage = "Apalancamiento x shock",
+    default_distance = "Distancia a default x shock"
+  )
+  
+  plot_results <- summary_results %>%
+    dplyr::mutate(
+      measure = factor(measure, levels = names(measure_labels), labels = measure_labels)
+    )
+
+  panel_plot_data <- results %>%
+    dplyr::filter(!is.na(coefficient)) %>%
+    dplyr::mutate(
+      measure = factor(measure, levels = names(measure_labels), labels = measure_labels)
+    )
+  
+  plot_obj <- ggplot(plot_results, aes(x = horizon, y = coefficient)) +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "#999999", linewidth = 0.4) +
+    geom_ribbon(
+      aes(ymin = ci_low, ymax = ci_high),
+      fill = "#619CFF",
+      alpha = 0.25,
+      linewidth = 0
+    ) +
+    geom_line(linewidth = 1, colour = "#0072B2") +
+    geom_point(size = 2, colour = "#0072B2") +
+    facet_wrap(~measure, scales = "free_y") +
+    labs(
+      title = "Proyecciones locales de la inversión",
+      subtitle = paste0(
+        "Promedios ponderados por número de observaciones (", length(panel_files),
+        " panel(es))"
+      ),
+      x = "Horizonte (trimestres)",
+      y = "Respuesta en logaritmos"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(face = "bold")
+    )
+  
+  if (nrow(panel_plot_data) > 0) {
+    plot_obj <- plot_obj +
+      geom_line(
+        data = panel_plot_data,
+        aes(x = horizon, y = coefficient, group = panel_file),
+        colour = "#CCCCCC",
+        linewidth = 0.4,
+        alpha = 0.6,
+        inherit.aes = FALSE
+      )
+  }
+  
+  ggplot2::ggsave(plot_path, plot_obj, width = 8, height = 5)
+  message("Plot saved to: ", plot_path)
+}
