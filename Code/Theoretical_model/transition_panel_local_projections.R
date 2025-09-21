@@ -18,6 +18,7 @@ suppressPackageStartupMessages({
   library(tibble)
   library(purrr)
   library(ggplot2)
+  library(patchwork)
 })
 
 # ------------------------------
@@ -226,8 +227,8 @@ summary_results <- results %>%
     .groups = "drop"
   ) %>%
   dplyr::mutate(
-    ci_low = coefficient - 1.96 * std_error,
-    ci_high = coefficient + 1.96 * std_error
+    ci_low = coefficient - 1.645 * std_error,
+    ci_high = coefficient + 1.645 * std_error
   )
 
 csv_path <- file.path(output_dir, "transition_panel_local_projections_simple.csv")
@@ -239,62 +240,60 @@ message("Local projection estimates saved to: ", csv_path)
 if (nrow(summary_results) == 0) {
   message("No valid regression results were produced, skipping the plot.")
 } else {
-  measure_labels <- c(
-    leverage = "Apalancamiento x shock",
-    default_distance = "Distancia a default x shock"
-  )
-  
   plot_results <- summary_results %>%
     dplyr::mutate(
-      measure = factor(measure, levels = names(measure_labels), labels = measure_labels)
+      ribbon_low = coefficient - 1.645 * std_error,
+      ribbon_high = coefficient + 1.645 * std_error
     )
 
-  panel_plot_data <- results %>%
-    dplyr::filter(!is.na(coefficient)) %>%
-    dplyr::mutate(
-      measure = factor(measure, levels = names(measure_labels), labels = measure_labels)
-    )
-  
-  plot_obj <- ggplot(plot_results, aes(x = horizon, y = coefficient)) +
-    geom_hline(yintercept = 0, linetype = "dashed", colour = "#999999", linewidth = 0.4) +
-    geom_ribbon(
-      aes(ymin = ci_low, ymax = ci_high),
-      fill = "#619CFF",
-      alpha = 0.25,
-      linewidth = 0
-    ) +
-    geom_line(linewidth = 1, colour = "#0072B2") +
-    geom_point(size = 2, colour = "#0072B2") +
-    facet_wrap(~measure, scales = "free_y") +
-    labs(
-      title = "Proyecciones locales de la inversión",
-      subtitle = paste0(
-        "Promedios ponderados por número de observaciones (", length(panel_files),
-        " panel(es))"
-      ),
-      x = "Horizonte (trimestres)",
-      y = "Respuesta en logaritmos"
-    ) +
-    theme_minimal(base_size = 13) +
-    theme(
-      panel.grid.minor = element_blank(),
-      plot.title = element_text(face = "bold"),
-      strip.text = element_text(face = "bold")
-    )
-  
-  if (nrow(panel_plot_data) > 0) {
-    plot_obj <- plot_obj +
-      geom_line(
-        data = panel_plot_data,
-        aes(x = horizon, y = coefficient, group = panel_file),
-        colour = "#CCCCCC",
-        linewidth = 0.4,
-        alpha = 0.6,
-        inherit.aes = FALSE
+  build_panel_plot <- function(data, panel_title, colour) {
+    ggplot(data, aes(x = horizon, y = coefficient)) +
+      geom_ribbon(
+        aes(ymin = ribbon_low, ymax = ribbon_high),
+        fill = colour,
+        alpha = 0.2
+      ) +
+      geom_line(linewidth = 1, colour = colour) +
+      geom_point(size = 2, colour = colour) +
+      scale_x_continuous(breaks = sort(unique(data$horizon))) +
+      labs(
+        title = panel_title,
+        x = "Trimestres",
+        y = "Efecto acumulado en la inversión"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(face = "bold")
       )
   }
 
-  print(plot_obj)
-  ggplot2::ggsave(plot_path, plot_obj, width = 8, height = 5)
-  message("Plot saved to: ", plot_path)
+ plot_definitions <- list(
+    leverage = list(title = "Panel (a): Heterogeneidad por apalancamiento", colour = "firebrick"),
+    default_distance = list(title = "Panel (b): Heterogeneidad por distancia al default", colour = "steelblue")
+  )
+
+  plot_list <- purrr::imap(plot_definitions, function(def, measure_key) {
+    data <- plot_results %>% dplyr::filter(measure == measure_key)
+    if (nrow(data) == 0) {
+      return(NULL)
+    }
+    build_panel_plot(data, def$title, def$colour)
+  }) %>%
+    purrr::compact()
+
+  if (length(plot_list) == 0) {
+    message("No valid regression results were produced, skipping the plot.")
+  } else {
+    figure_title <- paste0(
+      "Figura 1: Heterogeneidad financiera en la dinámica de la inversión ante un shock monetario expansivo\n"
+    )
+
+    figure_obj <- patchwork::wrap_plots(plotlist = plot_list, nrow = 1) +
+      patchwork::plot_annotation(title = figure_title)
+
+    print(figure_obj)
+    ggplot2::ggsave(plot_path, figure_obj, width = 10, height = 5)
+    message("Plot saved to: ", plot_path)
+  }
 }
