@@ -50,6 +50,16 @@ mean_if_any <- function(x) {
   mean(x, na.rm = TRUE)
 }
 
+clean_country <- function(x) {
+  if (inherits(x, "haven_labelled")) {
+    x <- haven::as_factor(x)
+  }
+  x <- as.character(x)
+  x <- trimws(x)
+  x[x == ""] <- NA_character_
+  x
+}
+
 calc_distribution <- function(data, var,
                               probs = c(0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)) {
   x <- data[[var]]
@@ -127,12 +137,20 @@ if (length(vars_to_winsorize) > 0) {
     mutate(across(all_of(vars_to_winsorize), winsorize_vec))
 }
 
-if ("Country_x" %in% names(df) && !("country" %in% names(df))) {
-  df <- df %>% mutate(country = Country_x)
-} else if (!("country" %in% names(df)) && "Country_y" %in% names(df)) {
-  df <- df %>% mutate(country = Country_y)
-} else if (!"country" %in% names(df)) {
-  df <- df %>% mutate(country = NA_character_)
+country_sources <- c("country", "Country", "Country_x", "Country_y")
+existing_sources <- intersect(country_sources, names(df))
+if (length(existing_sources) > 0) {
+  country_values <- rep(NA_character_, nrow(df))
+  for (col in existing_sources) {
+    candidate <- clean_country(df[[col]])
+    fill_idx <- is.na(country_values) & !is.na(candidate)
+    if (any(fill_idx)) {
+      country_values[fill_idx] <- candidate[fill_idx]
+    }
+  }
+  df$country <- country_values
+} else {
+  df$country <- rep(NA_character_, nrow(df))
 }
 
 sec_vars <- grep("^sec_", names(df), value = TRUE)
