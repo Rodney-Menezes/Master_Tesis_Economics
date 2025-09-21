@@ -411,44 +411,6 @@ irfIKHighLev   = 100 * (mIKByLeverage(:,2) ./ aggregateIKInc - 1);
 irfIKCloseDef  = 100 * (mIKByDefaultDistance(:,1) ./ aggregateIKInc - 1);
 irfIKFarDef    = 100 * (mIKByDefaultDistance(:,2) ./ aggregateIKInc - 1);
 
-figure
-
-h               = gcf;
-h.PaperUnits    = 'inches';
-h.PaperPosition = [0 0 13 4];
-
-subplot(1,2,1)
-hold on
-plot(vTime,irfIKLowLev,'linewidth',1.5,'linestyle','-','color',[0 112/255 192/255])
-plot(vTime,irfIKHighLev,'linewidth',1.5,'linestyle','--','color',[217/255 83/255 25/255])
-plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color',[.3 .3 .3])
-xlim([1 12])
-h        = legend('Bajo apalancamiento','Alto apalancamiento');
-set(h,'interpreter','latex','location','southwest','fontsize',14)
-set(gcf,'color','w')
-xlabel('Trimestres','interpreter','latex')
-ylabel('Desviacion inv./capital (\% vs. promedio incumbentes)','interpreter','latex')
-grid on
-title('Canal de apalancamiento','interpreter','latex','fontsize',14)
-hold off
-
-subplot(1,2,2)
-hold on
-plot(vTime,irfIKFarDef,'linewidth',1.5,'linestyle','-','color',[0 112/255 192/255])
-plot(vTime,irfIKCloseDef,'linewidth',1.5,'linestyle','--','color',[217/255 83/255 25/255])
-plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color',[.3 .3 .3])
-xlim([1 12])
-h        = legend('Lejos del default','Cerca del default');
-set(h,'interpreter','latex','location','southwest','fontsize',14)
-set(gcf,'color','w')
-xlabel('Trimestres','interpreter','latex')
-ylabel('Desviacion inv./capital (\% vs. promedio incumbentes)','interpreter','latex')
-grid on
-title('Canal distancia al default','interpreter','latex','fontsize',14)
-hold off
-
-print('../Results/heterogeneity_channels.eps','-depsc')
-
 %----------------------------------------------------------------
 % Interaction between investment and firm characteristics
 %----------------------------------------------------------------
