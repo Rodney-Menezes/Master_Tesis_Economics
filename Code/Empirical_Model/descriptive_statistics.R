@@ -131,6 +131,8 @@ if ("Country_x" %in% names(df) && !("country" %in% names(df))) {
   df <- df %>% mutate(country = Country_x)
 } else if (!("country" %in% names(df)) && "Country_y" %in% names(df)) {
   df <- df %>% mutate(country = Country_y)
+} else if (!"country" %in% names(df)) {
+  df <- df %>% mutate(country = NA_character_)
 }
 
 sector_vars <- grep("^sec_", names(df), value = TRUE)
