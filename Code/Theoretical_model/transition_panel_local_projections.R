@@ -293,7 +293,8 @@ if (nrow(summary_results) == 0) {
         inherit.aes = FALSE
       )
   }
-  
+
+  print(plot_obj)
   ggplot2::ggsave(plot_path, plot_obj, width = 8, height = 5)
   message("Plot saved to: ", plot_path)
 }
