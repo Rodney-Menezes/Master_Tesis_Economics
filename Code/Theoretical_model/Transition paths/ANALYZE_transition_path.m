@@ -538,6 +538,68 @@ csvwrite('mTransitionPanel_116.csv',mTransitionPanel_116);
 
 
 %----------------------------------------------------------------
+% Local projections for transition panels (MATLAB implementation)
+%----------------------------------------------------------------
+
+try
+        horizons_local_projection   = 0:8;
+        shock_parameters_lp = struct('length', 12, 'size', -0.0025, ...
+                                     'decay', 0.5, 'scale', -4);
+
+        panel_variable_names = who('mTransitionPanel_*');
+        if isempty(panel_variable_names)
+                fprintf('No transition panel data available for local projection analysis.\n');
+        else
+                fprintf('Processing %d transition panel(s) for local projections.\n', numel(panel_variable_names));
+
+                panel_tables_lp = {};
+                for iPanel = 1:numel(panel_variable_names)
+                        panel_name_lp = panel_variable_names{iPanel};
+                        panel_data_lp = eval(panel_name_lp);
+
+                        t_pre_value = NaN;
+                        numeric_tokens = regexp(panel_name_lp,'\d+','match');
+                        if ~isempty(numeric_tokens)
+                                t_pre_value = str2double(numeric_tokens{end});
+                        end
+
+                        fprintf('  %s %s (t_{pre} = %d)\n', char(8226), panel_name_lp, t_pre_value);
+
+                        panel_results_table = compute_local_projections_for_panel(panel_data_lp, t_pre_value, ...
+                                horizons_local_projection, shock_parameters_lp, panel_name_lp);
+                        if ~isempty(panel_results_table)
+                                panel_tables_lp{end+1,1} = panel_results_table; %#ok<AGROW>
+                        end
+                end
+
+                if ~isempty(panel_tables_lp)
+                        local_projection_results = vertcat(panel_tables_lp{:});
+
+                        results_directory = fullfile('..','Results');
+                        if ~exist(results_directory,'dir')
+                                mkdir(results_directory);
+                        end
+
+                        results_output_path = fullfile(results_directory,'transition_panel_local_projections_simple.csv');
+                        writetable(local_projection_results, results_output_path);
+                        fprintf('Local projection estimates saved to: %s\n', results_output_path);
+
+                        summary_table_lp = summarize_local_projection_results(local_projection_results, horizons_local_projection);
+                        if isempty(summary_table_lp)
+                                fprintf('No valid regression results were produced, skipping the plot.\n');
+                        else
+                                plot_local_projection_summary(summary_table_lp, horizons_local_projection, results_directory);
+                        end
+                else
+                        fprintf('No valid regression results were produced for the available panels.\n');
+                end
+        end
+catch ME
+        warning('Local projection analysis failed: %s', ME.message);
+end
+
+
+%----------------------------------------------------------------
 % State dependence counterfactual
 %----------------------------------------------------------------
 
@@ -664,4 +726,352 @@ hold off
 print('../Results/decomposition_elasticities_byprod.eps','-depsc')
 
 
+%% ------------------------------------------------------------------------
+%% Local function definitions for the local projection analysis
+%% ------------------------------------------------------------------------
+
+function panel_table = compute_local_projections_for_panel(panel_matrix, t_pre, horizons, shock_params, panel_name)
+
+panel_table = table();
+if isempty(panel_matrix)
+        return
+end
+
+in_sample_mask = panel_matrix(:,3) == 1;
+panel_matrix = panel_matrix(in_sample_mask,:);
+if isempty(panel_matrix)
+        return
+end
+
+panel_matrix = sortrows(panel_matrix,[1 2]);
+
+firm_id     = panel_matrix(:,1);
+quarter_id  = panel_matrix(:,2);
+capital     = panel_matrix(:,8);
+cash        = panel_matrix(:,9);
+debt        = panel_matrix(:,10);
+
+log_capital = NaN(size(capital));
+valid_capital = capital > 0;
+log_capital(valid_capital) = log(capital(valid_capital));
+
+ratio_mask = capital ~= 0;
+leverage = NaN(size(capital));
+leverage(ratio_mask) = debt(ratio_mask) ./ capital(ratio_mask);
+
+cash_to_capital = NaN(size(capital));
+cash_to_capital(ratio_mask) = cash(ratio_mask) ./ capital(ratio_mask);
+
+n_obs = numel(firm_id);
+lag_log_capital = NaN(n_obs,1);
+lag_leverage    = NaN(n_obs,1);
+lag_dd          = NaN(n_obs,1);
+if n_obs > 1
+        previous_idx = (1:(n_obs-1))';
+        next_idx = previous_idx + 1;
+        same_firm_previous = firm_id(next_idx) == firm_id(previous_idx);
+        sequential_previous = (quarter_id(next_idx) - quarter_id(previous_idx)) == 1;
+        valid_lag = same_firm_previous & sequential_previous;
+        valid_positions = next_idx(valid_lag);
+
+        lag_log_capital(valid_positions) = log_capital(previous_idx(valid_lag));
+        lag_leverage(valid_positions)    = leverage(previous_idx(valid_lag));
+        lag_dd(valid_positions)          = cash_to_capital(previous_idx(valid_lag));
+end
+
+max_quarter = max(quarter_id);
+shock_series = build_shock_series(max_quarter, t_pre, shock_params);
+shock_values = shock_series(quarter_id);
+
+lev_shock = lag_leverage .* shock_values;
+dd_shock  = lag_dd .* shock_values;
+
+max_h = max(horizons);
+lead_matrix = compute_lead_matrix(log_capital, firm_id, quarter_id, max_h);
+
+measure_names = {'leverage','default_distance'};
+interaction_series = {lev_shock, dd_shock};
+
+results_struct = struct('panel_name',{},'t_pre',{},'measure',{},'horizon',{},'coefficient',{},'std_error',{},'n_obs',{});
+
+for m = 1:numel(measure_names)
+        current_interaction = interaction_series{m};
+        for h = horizons
+                response_series = lead_matrix(:,h+1) - lag_log_capital;
+                [coef, se, n_reg_obs] = estimate_local_projection(firm_id, quarter_id, response_series, current_interaction);
+
+                results_struct(end+1,1) = struct( ...
+                        'panel_name', panel_name, ...
+                        't_pre', t_pre, ...
+                        'measure', measure_names{m}, ...
+                        'horizon', h, ...
+                        'coefficient', coef, ...
+                        'std_error', se, ...
+                        'n_obs', n_reg_obs); %#ok<AGROW>
+        end
+end
+
+if ~isempty(results_struct)
+        panel_table = struct2table(results_struct);
+end
+
+end
+
+
+function shock_series = build_shock_series(max_quarter, t_pre, params)
+
+shock_series = zeros(max_quarter,1);
+if isnan(t_pre) || t_pre + 1 > max_quarter
+        return
+end
+
+for h = 1:params.length
+        period = t_pre + h;
+        if period > max_quarter
+                break
+        end
+        shock_series(period,1) = params.size * (params.decay .^ (h - 1));
+end
+
+shock_series = shock_series * params.scale;
+
+end
+
+
+function lead_matrix = compute_lead_matrix(log_capital, firm_id, quarter_id, max_h)
+
+n_obs = numel(log_capital);
+lead_matrix = NaN(n_obs, max_h + 1);
+lead_matrix(:,1) = log_capital;
+
+if max_h == 0 || n_obs == 0
+        return
+end
+
+for h = 1:max_h
+        if h >= n_obs
+                break
+        end
+
+        idx_base = (1:(n_obs - h))';
+        same_firm = firm_id(idx_base) == firm_id(idx_base + h);
+        sequential_period = (quarter_id(idx_base + h) - quarter_id(idx_base)) == h;
+        valid_entries = same_firm & sequential_period;
+        valid_idx = idx_base(valid_entries);
+
+        lead_matrix(valid_idx, h + 1) = log_capital(valid_idx + h);
+end
+
+end
+
+
+function [beta, se, n_obs] = estimate_local_projection(firm_id, quarter_id, response, interaction)
+
+mask = isfinite(response) & isfinite(interaction);
+firm_id = firm_id(mask);
+quarter_id = quarter_id(mask);
+y = response(mask);
+x = interaction(mask);
+
+n_obs = numel(y);
+if n_obs == 0
+        beta = NaN;
+        se = NaN;
+        return
+end
+
+n_firm = max(firm_id);
+n_time = max(quarter_id);
+
+n_firm_effective = max(n_firm - 1, 0);
+n_time_effective = max(n_time - 1, 0);
+n_columns = n_firm_effective + n_time_effective;
+
+if n_columns > 0
+        obs_index = (1:n_obs)';
+        rows = [];
+        cols = [];
+
+        if n_firm_effective > 0
+                firm_mask = firm_id > 1;
+                rows = [rows; obs_index(firm_mask)]; %#ok<AGROW>
+                cols = [cols; firm_id(firm_mask) - 1]; %#ok<AGROW>
+        end
+
+        if n_time_effective > 0
+                time_mask = quarter_id > 1;
+                rows = [rows; obs_index(time_mask)]; %#ok<AGROW>
+                cols = [cols; n_firm_effective + quarter_id(time_mask) - 1]; %#ok<AGROW>
+        end
+
+        values = ones(numel(rows),1);
+        B = sparse(rows, cols, values, n_obs, n_columns);
+
+        tol = 1e-10;
+        max_iterations = 1000;
+
+        if isempty(B)
+                y_tilde = y - mean(y);
+                x_tilde = x - mean(x);
+        else
+                [coeff_y, flag_y] = lsqr(B, y, tol, max_iterations);
+                if flag_y > 1
+                        warning('LSQR did not converge for the response variable (flag %d).', flag_y);
+                end
+                y_tilde = y - B * coeff_y;
+
+                [coeff_x, flag_x] = lsqr(B, x, tol, max_iterations);
+                if flag_x > 1
+                        warning('LSQR did not converge for the regressor (flag %d).', flag_x);
+                end
+                x_tilde = x - B * coeff_x;
+        end
+else
+        y_tilde = y - mean(y);
+        x_tilde = x - mean(x);
+end
+
+denominator = sum(x_tilde .^ 2);
+if denominator <= eps || ~isfinite(denominator)
+        beta = NaN;
+        se = NaN;
+        return
+end
+
+beta = (x_tilde' * y_tilde) / denominator;
+residuals = y_tilde - x_tilde * beta;
+
+cluster_sums = accumarray(firm_id, x_tilde .* residuals, [n_firm, 1], @sum, 0);
+variance_beta = (cluster_sums' * cluster_sums) / (denominator ^ 2);
+
+cluster_counts = accumarray(firm_id, 1, [n_firm, 1], @sum, 0);
+G = sum(cluster_counts > 0);
+K = 1;
+
+if G > 1
+        variance_beta = variance_beta * (G / (G - 1));
+end
+if n_obs > K
+        variance_beta = variance_beta * ((n_obs - 1) / (n_obs - K));
+end
+
+se = sqrt(variance_beta);
+
+end
+
+
+function summary_table = summarize_local_projection_results(results_table, horizons)
+
+summary_table = table();
+if isempty(results_table)
+        return
+end
+
+measures = unique(results_table.measure);
+summary_entries = struct('measure',{},'horizon',{},'coefficient',{},'std_error',{},'n_obs',{},'n_panels',{},'ci_low',{},'ci_high',{});
+
+for iMeasure = 1:numel(measures)
+        measure_key = measures{iMeasure};
+        for h = horizons
+                mask = strcmp(results_table.measure, measure_key) & results_table.horizon == h & isfinite(results_table.coefficient);
+                if ~any(mask)
+                        continue
+                end
+
+                coeff = weighted_mean_safe(results_table.coefficient(mask), results_table.n_obs(mask));
+                se = sqrt(weighted_mean_safe(results_table.std_error(mask) .^ 2, results_table.n_obs(mask)));
+                n_obs = sum(results_table.n_obs(mask));
+                n_panels = sum(mask);
+                ci_low = coeff - 1.645 * se;
+                ci_high = coeff + 1.645 * se;
+
+                summary_entries(end+1,1) = struct( ...
+                        'measure', measure_key, ...
+                        'horizon', h, ...
+                        'coefficient', coeff, ...
+                        'std_error', se, ...
+                        'n_obs', n_obs, ...
+                        'n_panels', n_panels, ...
+                        'ci_low', ci_low, ...
+                        'ci_high', ci_high); %#ok<AGROW>
+        end
+end
+
+if ~isempty(summary_entries)
+        summary_table = struct2table(summary_entries);
+end
+
+end
+
+
+function value = weighted_mean_safe(values, weights)
+
+valid_entries = isfinite(values) & isfinite(weights) & (weights > 0);
+if ~any(valid_entries)
+        value = NaN;
+        return
+end
+
+values = values(valid_entries);
+weights = weights(valid_entries);
+
+value = sum(values .* weights) / sum(weights);
+
+end
+
+
+function plot_local_projection_summary(summary_table, horizons, results_directory)
+
+if isempty(summary_table)
+        return
+end
+
+measure_order = {'leverage','default_distance'};
+panel_titles = {'Panel (a): Heterogeneidad por apalancamiento', ...
+                'Panel (b): Heterogeneidad por distancia al default'};
+panel_colours = [178, 34, 34; 70, 130, 180] / 255;
+
+fig = figure('Color','w','Position',[100 100 960 420]);
+
+for iPanel = 1:numel(measure_order)
+        subplot(1, numel(measure_order), iPanel);
+        hold on
+
+        data_subset = summary_table(strcmp(summary_table.measure, measure_order{iPanel}), :);
+        if isempty(data_subset)
+                text(0.5,0.5,'Sin resultados','HorizontalAlignment','center');
+                axis off
+                hold off
+                continue
+        end
+
+        [h_values, sort_idx] = sort(data_subset.horizon);
+        coeff_values = data_subset.coefficient(sort_idx);
+        low_values = data_subset.ci_low(sort_idx);
+        high_values = data_subset.ci_high(sort_idx);
+
+        fill([h_values; flipud(h_values)], [low_values; flipud(high_values)], panel_colours(iPanel,:), ...
+                'FaceAlpha',0.2,'EdgeColor','none');
+        plot(h_values, coeff_values, '-', 'Color', panel_colours(iPanel,:), 'LineWidth', 1.5);
+        plot(h_values, coeff_values, 'o', 'Color', panel_colours(iPanel,:), ...
+                'MarkerFaceColor', panel_colours(iPanel,:), 'LineWidth', 1.5);
+
+        xlim([min(horizons), max(horizons)]);
+        xticks(horizons);
+        xlabel('Trimestres','Interpreter','latex');
+        ylabel('Efecto acumulado en la inversi\''on','Interpreter','latex');
+        title(panel_titles{iPanel},'Interpreter','latex','FontSize',13);
+        grid on
+        set(gca,'FontSize',12);
+        hold off
+end
+
+sgtitle({'Figura 1: Heterogeneidad financiera en la din\''amica de la inversi\''on', ...
+         'ante un shock monetario expansivo'}, 'Interpreter','latex','FontSize',14);
+
+plot_path = fullfile(results_directory,'transition_panel_local_projections_simple.png');
+print(fig, plot_path, '-dpng', '-r300');
+fprintf('Plot saved to: %s\n', plot_path);
+
+end
 
