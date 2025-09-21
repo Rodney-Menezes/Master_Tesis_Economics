@@ -136,7 +136,7 @@ for iProd   = 1 : nProd
 
 	            mCapitalPrimeContinuous(iProd,iCash)    = xopt(1);
 	            mDebtPrimeContinuous(iProd,iCash)       = xopt(2);
-	            [~,mDividendsContinuous(iProd,iCash)]   = mycon(xopt);
+	            [mDividendsContinuous(iProd,iCash),~]   = mycon(xopt);
 	            mDividendsContinuous(iProd,iCash)       = -mDividendsContinuous(iProd,iCash);
 	            mDebtPriceContinuous(iProd,iCash)       = (vQ(t,1) * xopt(1) - mCashGrid(iProd,iCash) - ...
 															mDividendsContinuous(iProd,iCash)) / xopt(2);
@@ -200,7 +200,7 @@ for iProd   = 1 : nProd
 
 	            mCapitalPrimeContinuous(iProd,iCash)    = xopt(1);
 	            mDebtPrimeContinuous(iProd,iCash)       = xopt(2);
-	            [~,mDividendsContinuous(iProd,iCash)]   = mycon(xopt);
+	            [mDividendsContinuous(iProd,iCash),~]   = mycon(xopt);
 	            mDividendsContinuous(iProd,iCash)       = -mDividendsContinuous(iProd,iCash);
 	            mDebtPriceContinuous(iProd,iCash)       = (vQ(t,1) * xopt(1) - mCashGrid(iProd,iCash) - ...
 															mDividendsContinuous(iProd,iCash)) / xopt(2);
