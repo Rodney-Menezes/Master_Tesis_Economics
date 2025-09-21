@@ -32,6 +32,8 @@ shock_length <- 12
 shock_size <- -0.0025
 shock_decay <- 0.5
 shock_scale <- -4
+# Winsorisation probability for financial variables
+winsor_prob <- 0.005
 
 # Directory that stores the simulated panels. The default points to the path
 # used on the author's machine, but it can be overridden by defining the
@@ -80,6 +82,15 @@ build_shock_series <- function(max_period, t_pre) {
   shock * shock_scale
 }
 
+winsorize <- function(x, p = winsor_prob) {
+  if (all(is.na(x))) {
+    return(x)
+  }
+  lo <- stats::quantile(x, p, na.rm = TRUE)
+  hi <- stats::quantile(x, 1 - p, na.rm = TRUE)
+  pmin(pmax(x, lo), hi)
+}
+
 prepare_panel <- function(file_path) {
   raw <- readr::read_csv(
     file_path,
@@ -106,11 +117,18 @@ prepare_panel <- function(file_path) {
     )
 
   df <- df %>%
+    dplyr::mutate(
+      leverage_win = winsorize(leverage),
+      cash_to_capital_win = winsorize(cash_to_capital)
+    ) %>%
     dplyr::group_by(firm_id) %>%
+    dplyr::arrange(quarter_id, .by_group = TRUE) %>%
     dplyr::mutate(
       lag_log_capital = dplyr::lag(log_capital),
-      lag_leverage = dplyr::lag(leverage),
-      lag_dd = dplyr::lag(cash_to_capital)
+      lev_dm = leverage_win - mean(leverage_win, na.rm = TRUE),
+      dd_dm = cash_to_capital_win - mean(cash_to_capital_win, na.rm = TRUE),
+      lag_lev_dm = dplyr::lag(lev_dm),
+      lag_dd_dm = dplyr::lag(dd_dm)
     ) %>%
     dplyr::ungroup()
 
@@ -211,8 +229,8 @@ results <- purrr::map_dfr(panel_files, function(path) {
   df <- df %>%
     dplyr::mutate(
       shock = shock_series[quarter_id],
-      lev_shock = lag_leverage * shock,
-      dd_shock = lag_dd * shock
+      lev_shock = lag_lev_dm * shock,
+      dd_shock = lag_dd_dm * shock
     )
 
   message("  • ", basename(path), " (t_pre = ", t_pre, ")")
