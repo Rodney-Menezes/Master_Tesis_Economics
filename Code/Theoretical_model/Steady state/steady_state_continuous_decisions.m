@@ -114,7 +114,7 @@ for iProd   = 1 : nProd
 
 		% Define the functions for the optimization
         myfun           = @(x) steady_state_decisionObjectiveFunction(x,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
-        mycon           = @(x) steady_state_decisionConstraintFunction_inequality(x,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
+        mycon           = @(x) steady_state_decisionConstraintFunction(x,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
 
         % Compute optimum
         [xopt,fval,exitflag] = fmincon(myfun,[mCapitalPrime(iProd,iCash);mDebtPrime(iProd,iCash)],...
@@ -163,7 +163,7 @@ for iProd   = 1 : nProd
 
             mCapitalPrimeContinuous(iProd,iCash)    = xopt(1);
             mDebtPrimeContinuous(iProd,iCash)       = xopt(2);
-			mDividendsContinuous(iProd,iCash)       = steady_state_decisionConstraintFunction_inequality(xopt,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
+			[~,mDividendsContinuous(iProd,iCash)]   = steady_state_decisionConstraintFunction(xopt,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
             mDividendsContinuous(iProd,iCash)       = -mDividendsContinuous(iProd,iCash);
             mDebtPriceContinuous(iProd,iCash)       = (qSS * xopt(1) - mCashGrid(iProd,iCash) - ...
                                                         mDividendsContinuous(iProd,iCash)) / xopt(2);
@@ -174,7 +174,7 @@ for iProd   = 1 : nProd
 
       % Define the functions for the optimization
       myfun           = @(x) steady_state_decisionObjectiveFunction(x,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
-      mycon           = @(x) steady_state_decisionConstraintFunction_inequality(x,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
+      mycon           = @(x) steady_state_decisionConstraintFunction(x,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
 
       % Compute optimum
       [xopt,fval,exitflag] = fmincon(myfun,[mCapitalPrime(iProd,iCash);mDebtPrime(iProd,iCash)],...
@@ -223,7 +223,7 @@ for iProd   = 1 : nProd
 
             mCapitalPrimeContinuous(iProd,iCash)    = xopt(1);
             mDebtPrimeContinuous(iProd,iCash)       = xopt(2);
-			mDividendsContinuous(iProd,iCash)       = steady_state_decisionConstraintFunction_inequality(xopt,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
+			[~,mDividendsContinuous(iProd,iCash)]   = steady_state_decisionConstraintFunction(xopt,iProd,iCash,vDefaultCutoff,mValue,wage,sParms);
             mDividendsContinuous(iProd,iCash)       = -mDividendsContinuous(iProd,iCash);
             mDebtPriceContinuous(iProd,iCash)       = (qSS * xopt(1) - mCashGrid(iProd,iCash) - ...
                                                         mDividendsContinuous(iProd,iCash)) / xopt(2);
