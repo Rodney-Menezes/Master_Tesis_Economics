@@ -55,5 +55,5 @@ debtPrice           = min(bbeta,max(0,mShocksTransition(iProd,:) * (bbeta * (1 -
 % Compute dividends and return constraint
 %---------------------------------------------------------------
 
-ceq		= qSS * kPrime - mCashGrid(iProd,iCash) - debtPrice * bPrime;
-c		= [];
+c		= qSS * kPrime - mCashGrid(iProd,iCash) - debtPrice * bPrime;
+ceq		= [];
