@@ -25,7 +25,7 @@ suppressPackageStartupMessages({
 # Configuration
 # ------------------------------
 # Horizons for the local projections (in quarters)
-horizons <- 0:12
+horizons <- 0:13
 # Monetary shock profile (same as in the MATLAB/Do-file implementation)
 shock_length <- 12
 shock_size <- -0.0025
