@@ -562,6 +562,8 @@ comparison_plot <- (plot_lev | plot_dd) +
   )
 
 print(comparison_plot)
+print(plot_lev)
+print(plot_dd)
 
 output_path <- file.path(comparison_outdir, "comparacion_simulado_empirico_local_projections.png")
 
@@ -574,6 +576,22 @@ ggplot2::ggsave(
 )
 
 message("Figura comparativa guardada en: ", output_path)
+
+ggplot2::ggsave(
+  filename = file.path(comparison_outdir, "comparacion_simulado_empirico_local_projections_panel_a.png"),
+  plot = plot_lev,
+  width = 5.5,
+  height = 5,
+  dpi = 300
+)
+
+ggplot2::ggsave(
+  filename = file.path(comparison_outdir, "comparacion_simulado_empirico_local_projections_panel_b.png"),
+  plot = plot_dd,
+  width = 5.5,
+  height = 5,
+  dpi = 300
+)
 
 # Guardar resultados agregados para referencia
 summary_path <- file.path(comparison_outdir, "comparacion_simulado_empirico_local_projections.csv")
