@@ -25,7 +25,8 @@ suppressPackageStartupMessages({
 # Configuration
 # ------------------------------
 # Horizons for the local projections (in quarters)
-horizons <- 0:13
+max_forecast_horizon <- 12L
+horizons <- seq_len(max_forecast_horizon)
 # Monetary shock profile (same as in the MATLAB/Do-file implementation)
 shock_length <- 12
 shock_size <- -0.0025
@@ -267,7 +268,7 @@ if (nrow(summary_results) == 0) {
       ribbon_high = coefficient + 1.645 * std_error
     )
 
-  build_panel_plot <- function(data, panel_title, colour) {
+  build_panel_plot <- function(data, panel_title, colour, max_horizon) {
     ggplot(data, aes(x = horizon, y = coefficient)) +
       geom_ribbon(
         aes(ymin = ribbon_low, ymax = ribbon_high),
@@ -276,7 +277,10 @@ if (nrow(summary_results) == 0) {
       ) +
       geom_line(linewidth = 1, colour = colour) +
       geom_point(size = 2, colour = colour) +
-      scale_x_continuous(breaks = sort(unique(data$horizon))) +
+      scale_x_continuous(
+        breaks = seq_len(max_horizon),
+        limits = c(1, max_horizon)
+      ) +
       labs(
         title = panel_title,
         x = "Trimestres",
@@ -299,7 +303,7 @@ if (nrow(summary_results) == 0) {
     if (nrow(data) == 0) {
       return(NULL)
     }
-    build_panel_plot(data, def$title, def$colour)
+    build_panel_plot(data, def$title, def$colour, max_forecast_horizon)
   }) %>%
     purrr::compact()
 
