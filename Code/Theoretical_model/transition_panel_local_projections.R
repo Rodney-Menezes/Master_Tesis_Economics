@@ -264,11 +264,11 @@ if (nrow(summary_results) == 0) {
       theme_minimal(base_size = 13) +
       theme(
         panel.grid.minor = element_blank(),
-        plot.title = element_text(face = "bold")
+        plot.title = element_text(face = "plain")
       )
   }
 
- plot_definitions <- list(
+  plot_definitions <- list(
     leverage = list(title = "Panel (a): Heterogeneidad por apalancamiento", colour = "firebrick"),
     default_distance = list(title = "Panel (b): Heterogeneidad por distancia al default", colour = "steelblue")
   )
@@ -290,7 +290,10 @@ if (nrow(summary_results) == 0) {
     )
 
     figure_obj <- patchwork::wrap_plots(plotlist = plot_list, nrow = 1) +
-      patchwork::plot_annotation(title = figure_title)
+      patchwork::plot_annotation(
+        title = figure_title,
+        theme = theme(plot.title = element_text(face = "plain"))
+      )
 
     print(figure_obj)
     ggplot2::ggsave(plot_path, figure_obj, width = 10, height = 5)
