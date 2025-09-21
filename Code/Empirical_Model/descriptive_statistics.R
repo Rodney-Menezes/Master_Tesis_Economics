@@ -135,19 +135,19 @@ if ("Country_x" %in% names(df) && !("country" %in% names(df))) {
   df <- df %>% mutate(country = NA_character_)
 }
 
-sector_vars <- grep("^sec_", names(df), value = TRUE)
-if (length(sector_vars) > 0) {
-  sector_mat <- df %>% select(all_of(sector_vars)) %>% as.matrix()
-  sector_mat_na <- sector_mat
-  sector_mat_na[is.na(sector_mat_na)] <- -Inf
-  sector_idx <- max.col(sector_mat_na, ties.method = "first")
-  sector_mat_zero <- sector_mat
-  sector_mat_zero[is.na(sector_mat_zero)] <- 0
-  has_sector <- rowSums(sector_mat_zero) > 0
-  sector_clean <- gsub("^sec_", "", sector_vars)
-  sector_vec <- rep(NA_character_, nrow(df))
-  sector_vec[has_sector] <- sector_clean[sector_idx[has_sector]]
-  df$sector <- sector_vec
+sec_vars <- grep("^sec_", names(df), value = TRUE)
+if (length(sec_vars) > 0) {
+  sec_mat <- df %>% select(all_of(sec_vars)) %>% as.matrix()
+  sec_mat_na <- sec_mat
+  sec_mat_na[is.na(sec_mat_na)] <- -Inf
+  sec_idx <- max.col(sec_mat_na, ties.method = "first")
+  sec_mat_zero <- sec_mat
+  sec_mat_zero[is.na(sec_mat_zero)] <- 0
+  has_sec <- rowSums(sec_mat_zero) > 0
+  sec_clean <- gsub("^sec_", "", sec_vars)
+  sec_vec <- rep(NA_character_, nrow(df))
+  sec_vec[has_sec] <- sec_clean[sec_idx[has_sec]]
+  df$sec <- sec_vec
 }
 
 if (all(c("atq", "saleq") %in% names(df))) {
@@ -172,6 +172,10 @@ if ("leverage" %in% names(df)) {
 if ("dd" %in% names(df)) {
   df <- df %>% mutate(dd_std = standardize_vec(dd))
 }
+if ("dlog_capital" %in% names(df)) {
+  df <- df %>% mutate(dlog_capital_std = standardize_vec(dlog_capital))
+}
+
 # -------------------------------
 # Tabla 2: Firm-Level Variables
 # -------------------------------
@@ -250,7 +254,7 @@ cat("\n--- Tabla 2C: Correlaciones (residualizadas, FE firma, winsorizadas) ---\
 print(round(corrC, 3))
 
 # ---------------------------------------------------
-# 3) Conteo de firmas y observaciones por país y sector
+# 3) Conteo de firmas y observaciones por país y sec
 # ---------------------------------------------------
 
 cat("\n--- Conteo por país (winsorizado) ---\n")
@@ -265,22 +269,22 @@ conteo_pais <- df %>%
   arrange(desc(Observaciones))
 print(conteo_pais)
 
-cat("\n--- Conteo por sector (winsorizado) ---\n")
-conteo_sector <- df %>%
-  filter(!is.na(sector)) %>%
-  group_by(sector) %>%
+cat("\n--- Conteo por sec (winsorizado) ---\n")
+conteo_sec <- df %>%
+  filter(!is.na(sec)) %>%
+  group_by(sec) %>%
   summarise(
     Firms = n_distinct(name),
     Observaciones = n(),
     .groups = "drop"
   ) %>%
   arrange(desc(Observaciones))
-print(conteo_sector)
+print(conteo_sec)
 
-cat("\n--- Principales combinaciones país-sector (top 10) ---\n")
-conteo_pais_sector <- df %>%
-  filter(!is.na(country), !is.na(sector)) %>%
-  group_by(country, sector) %>%
+cat("\n--- Principales combinaciones país-sec (top 10) ---\n")
+conteo_pais_sec <- df %>%
+  filter(!is.na(country), !is.na(sec)) %>%
+  group_by(country, sec) %>%
   summarise(
     Firms = n_distinct(name),
     Observaciones = n(),
@@ -288,7 +292,7 @@ conteo_pais_sector <- df %>%
   ) %>%
   arrange(desc(Observaciones)) %>%
   slice_head(n = 10)
-print(conteo_pais_sector)
+print(conteo_pais_sec)
 
 # ---------------------------------------------------
 # 4) Top firmas por tamaño (size_raw winsorizado)
@@ -297,7 +301,7 @@ print(conteo_pais_sector)
 if ("size_raw" %in% names(df)) {
   top_firmas_tamano <- df %>%
     filter(!is.na(size_raw)) %>%
-    group_by(name, country, sector) %>%
+    group_by(name, country, sec) %>%
     summarise(
       Promedio_size = mean(size_raw, na.rm = TRUE),
       Observaciones = n(),
