@@ -762,10 +762,13 @@ leverage(ratio_mask) = debt(ratio_mask) ./ capital(ratio_mask);
 cash_to_capital = NaN(size(capital));
 cash_to_capital(ratio_mask) = cash(ratio_mask) ./ capital(ratio_mask);
 
+leverage_dm = demean_by_group(leverage, firm_id);
+cash_to_capital_dm = demean_by_group(cash_to_capital, firm_id);
+
 n_obs = numel(firm_id);
 lag_log_capital = NaN(n_obs,1);
-lag_leverage    = NaN(n_obs,1);
-lag_dd          = NaN(n_obs,1);
+lag_leverage_dm = NaN(n_obs,1);
+lag_dd_dm       = NaN(n_obs,1);
 if n_obs > 1
         previous_idx = (1:(n_obs-1))';
         next_idx = previous_idx + 1;
@@ -775,16 +778,16 @@ if n_obs > 1
         valid_positions = next_idx(valid_lag);
 
         lag_log_capital(valid_positions) = log_capital(previous_idx(valid_lag));
-        lag_leverage(valid_positions)    = leverage(previous_idx(valid_lag));
-        lag_dd(valid_positions)          = cash_to_capital(previous_idx(valid_lag));
+        lag_leverage_dm(valid_positions) = leverage_dm(previous_idx(valid_lag));
+        lag_dd_dm(valid_positions)       = cash_to_capital_dm(previous_idx(valid_lag));
 end
 
 max_quarter = max(quarter_id);
 shock_series = build_shock_series(max_quarter, t_pre, shock_params);
 shock_values = shock_series(quarter_id);
 
-lev_shock = lag_leverage .* shock_values;
-dd_shock  = lag_dd .* shock_values;
+lev_shock = lag_leverage_dm .* shock_values;
+dd_shock  = lag_dd_dm .* shock_values;
 
 max_h = max(horizons);
 lead_matrix = compute_lead_matrix(log_capital, firm_id, quarter_id, max_h);
@@ -1016,6 +1019,37 @@ values = values(valid_entries);
 weights = weights(valid_entries);
 
 value = sum(values .* weights) / sum(weights);
+
+end
+
+
+function demeaned_series = demean_by_group(series, group_ids)
+
+if isempty(series)
+        demeaned_series = series;
+        return
+end
+
+if ~isequal(size(series), size(group_ids))
+        error('Series and group identifiers must have the same dimensions.');
+end
+
+valid_entries = isfinite(series) & isfinite(group_ids);
+demeaned_series = NaN(size(series));
+
+if ~any(valid_entries)
+        return
+end
+
+max_group_id = max(group_ids(valid_entries));
+sum_by_group = accumarray(group_ids(valid_entries), series(valid_entries), [max_group_id, 1], @sum, 0);
+count_by_group = accumarray(group_ids(valid_entries), 1, [max_group_id, 1], @sum, 0);
+
+group_means = NaN(max_group_id, 1);
+positive_counts = count_by_group > 0;
+group_means(positive_counts) = sum_by_group(positive_counts) ./ count_by_group(positive_counts);
+
+demeaned_series(valid_entries) = series(valid_entries) - group_means(group_ids(valid_entries));
 
 end
 
