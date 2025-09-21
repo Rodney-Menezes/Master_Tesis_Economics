@@ -27,9 +27,9 @@ suppressPackageStartupMessages({
 horizons <- 0:8
 # Monetary shock profile (same as in the MATLAB/Do-file implementation)
 shock_length <- 12
-shock_size <- 0.0025
+shock_size <- -0.0025
 shock_decay <- 0.5
-shock_scale <- -4  # flip sign and annualise
+shock_scale <- -4
 
 # Directory that stores the simulated panels. The default points to the path
 # used on the author's machine, but it can be overridden by defining the
