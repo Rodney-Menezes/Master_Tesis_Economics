@@ -36,7 +36,7 @@ suppressPackageStartupMessages({
 # Configuración
 # ------------------------------
 # Horizonte máximo de interés
-sim_horizons <- 0:8
+sim_horizons <- 0:13
 emp_horizons <- 0:12
 
 # Parámetros del shock monetario en el modelo teórico
@@ -141,7 +141,7 @@ run_local_projection <- function(df, interaction_col, horizon) {
     interaction = df_h[[interaction_col]]
   ) %>%
     dplyr::filter(!is.na(response), !is.na(interaction))
-  
+
   if (nrow(reg_data) == 0) {
     return(tibble(
       horizon = horizon,
@@ -150,13 +150,40 @@ run_local_projection <- function(df, interaction_col, horizon) {
       n_obs = 0L
     ))
   }
+
+  has_within_quarter_variation <- reg_data %>%
+    dplyr::group_by(quarter_id) %>%
+    dplyr::summarise(n_unique = dplyr::n_distinct(interaction), .groups = "drop") %>%
+    dplyr::filter(n_unique > 1) %>%
+    nrow() > 0
   
-  model <- fixest::feols(
-    response ~ interaction,
-    data = reg_data,
-    fixef = c("firm_id", "quarter_id"),
-    cluster = ~firm_id
+  if (!has_within_quarter_variation) {
+    return(tibble(
+      horizon = horizon,
+      coefficient = NA_real_,
+      std_error = NA_real_,
+      n_obs = 0L
+    ))
+  }
+  
+  model <- tryCatch(
+    fixest::feols(
+      response ~ interaction,
+      data = reg_data,
+      fixef = c("firm_id", "quarter_id"),
+      cluster = ~firm_id
+    ),
+    error = function(e) NULL
   )
+
+  if (is.null(model)) {
+    return(tibble(
+      horizon = horizon,
+      coefficient = NA_real_,
+      std_error = NA_real_,
+      n_obs = as.integer(nrow(reg_data))
+    ))
+  }
   
   vcov_mat <- stats::vcov(model)
   coef_val <- stats::coef(model)["interaction"]
