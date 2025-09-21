@@ -42,7 +42,7 @@ emp_horizons <- 0:12
 # Parámetros del shock monetario en el modelo teórico
 shock_length <- 12
 shock_size   <- -0.0025
-shock_decay  <- 0.5
+shock_decay  <- 0.9
 shock_scale  <- -4
 
 # Directorios y rutas de archivos
@@ -211,7 +211,9 @@ compute_simulated_dynamics <- function(panel_dir, horizons) {
     pattern = "^mTransitionPanel_\\d+\\.csv$",
     full.names = TRUE
   )
-  
+
+  horizon_grid <- sort(unique(c(0, horizons)))
+
   if (length(panel_files) == 0) {
     stop("No se encontraron archivos 'mTransitionPanel_*.csv' en ", panel_dir, ".")
   }
@@ -234,12 +236,12 @@ compute_simulated_dynamics <- function(panel_dir, horizons) {
     
     message("  • ", basename(path), " (t_pre = ", t_pre, ")")
     
-    lev_results <- purrr::map_dfr(horizons, ~ run_local_projection(df, "lev_shock", .x)) %>%
+    lev_results <- purrr::map_dfr(horizon_grid, ~ run_local_projection(df, "lev_shock", .x)) %>%
       dplyr::mutate(measure = "leverage")
-    
-    dd_results <- purrr::map_dfr(horizons, ~ run_local_projection(df, "dd_shock", .x)) %>%
+
+    dd_results <- purrr::map_dfr(horizon_grid, ~ run_local_projection(df, "dd_shock", .x)) %>%
       dplyr::mutate(measure = "default_distance")
-    
+
     dplyr::bind_rows(lev_results, dd_results) %>%
       dplyr::mutate(
         panel_file = basename(path),
@@ -248,7 +250,6 @@ compute_simulated_dynamics <- function(panel_dir, horizons) {
   })
   
   summary_results <- results %>%
-    dplyr::filter(!is.na(coefficient)) %>%
     dplyr::group_by(measure, horizon) %>%
     dplyr::summarise(
       coefficient = weighted_mean_safe(coefficient, n_obs),
@@ -256,7 +257,18 @@ compute_simulated_dynamics <- function(panel_dir, horizons) {
       n_obs = sum(n_obs, na.rm = TRUE),
       n_panels = dplyr::n_distinct(panel_file),
       .groups = "drop"
-    )
+    ) %>%
+    tidyr::complete(
+      measure,
+      horizon = horizon_grid,
+      fill = list(
+        coefficient = NA_real_,
+        std_error = NA_real_,
+        n_obs = 0,
+        n_panels = 0
+      )
+    ) %>%
+    dplyr::arrange(measure, horizon)
   
   list(raw = results, summary = summary_results)
 }
@@ -342,6 +354,8 @@ compute_empirical_dynamics <- function(data_path, horizons) {
     )
   }
   
+  horizon_grid <- sort(unique(c(0, horizons)))
+
   df <- haven::read_dta(data_path) %>%
     dplyr::mutate(dateq = zoo::as.yearqtr(dateq)) %>%
     dplyr::arrange(name, dateq)
@@ -392,14 +406,14 @@ compute_empirical_dynamics <- function(data_path, horizons) {
       d2d_shock = L1_dd_dm  * shock_exp
     )
   
-  vars_cap <- paste0("cumF", 0:12, "_dlog_capital")
+  vars_cap <- paste0("cumF", horizon_grid, "_dlog_capital")
   df_dyn <- if (!all(vars_cap %in% names(df))) {
     df %>%
       dplyr::group_by(name) %>%
       dplyr::arrange(dateq, .by_group = TRUE) %>%
       dplyr::group_modify(~ {
         tmp <- .x
-        for (h in 0:12) {
+        for (h in horizon_grid) {
           tmp[[paste0("cumF", h, "_dlog_capital")]] <-
             rowSums(purrr::map_dfc(0:h, ~ dplyr::lead(tmp$dlog_capital, .x)), na.rm = TRUE)
         }
@@ -415,7 +429,7 @@ compute_empirical_dynamics <- function(data_path, horizons) {
   controls_vec   <- c(controls_firm, controls_macro)
   all_controls   <- paste(controls_vec, collapse = " + ")
   
-  lev_models <- purrr::map(0:12, function(h) {
+  lev_models <- purrr::map(horizon_grid, function(h) {
     fixest::feols(
       as.formula(paste0(
         "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls,
@@ -426,7 +440,7 @@ compute_empirical_dynamics <- function(data_path, horizons) {
     )
   })
   
-  dd_models <- purrr::map(0:12, function(h) {
+  dd_models <- purrr::map(horizon_grid, function(h) {
     fixest::feols(
       as.formula(paste0(
         "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls,
@@ -436,22 +450,31 @@ compute_empirical_dynamics <- function(data_path, horizons) {
       cluster = ~ Country + dateq + name
     )
   })
-  
+
   dyn_lev <- tibble(
     measure = "leverage",
-    horizon = 0:12,
+    horizon = horizon_grid,
     coefficient = purrr::map_dbl(lev_models, ~ stats::coef(.x)["lev_shock"]),
     std_error  = purrr::map_dbl(lev_models, ~ sqrt(stats::vcov(.x)["lev_shock", "lev_shock"]))
   )
   
   dyn_dd <- tibble(
     measure = "default_distance",
-    horizon = 0:12,
+    horizon = horizon_grid,
     coefficient = purrr::map_dbl(dd_models, ~ stats::coef(.x)["d2d_shock"]),
     std_error  = purrr::map_dbl(dd_models, ~ sqrt(stats::vcov(.x)["d2d_shock", "d2d_shock"]))
   )
-  
-  bind_rows(dyn_lev, dyn_dd)
+
+  bind_rows(dyn_lev, dyn_dd) %>%
+    tidyr::complete(
+      measure,
+      horizon = horizon_grid,
+      fill = list(
+        coefficient = NA_real_,
+        std_error = NA_real_
+      )
+    ) %>%
+    dplyr::arrange(measure, horizon)
 }
 
 # ------------------------------
@@ -461,7 +484,7 @@ compute_empirical_dynamics <- function(data_path, horizons) {
 sim_results <- compute_simulated_dynamics(transition_dir, sim_horizons)
 emp_results <- compute_empirical_dynamics(empirical_path, emp_horizons)
 
-common_horizons <- intersect(sim_results$summary$horizon, emp_results$horizon)
+common_horizons <- sort(intersect(sim_results$summary$horizon, emp_results$horizon))
 if (length(common_horizons) == 0) {
   stop("No hay horizontes comunes entre los resultados simulados y empíricos.")
 }
@@ -489,7 +512,7 @@ palette_colors <- c(
   "Empírico (Datos firm-level)" = "steelblue"
 )
 
-plot_measure <- function(data, panel_title) {
+plot_measure <- function(data, panel_title, horizons_axis) {
   ggplot(data, aes(x = horizon, y = coefficient, color = dataset, linetype = dataset)) +
     geom_ribbon(
       aes(ymin = ribbon_low, ymax = ribbon_high, fill = dataset),
@@ -500,7 +523,10 @@ plot_measure <- function(data, panel_title) {
     geom_point(size = 2) +
     scale_color_manual(values = palette_colors) +
     scale_fill_manual(values = palette_colors) +
-    scale_x_continuous(breaks = sort(unique(data$horizon))) +
+    scale_x_continuous(
+      breaks = horizons_axis,
+      limits = range(horizons_axis)
+    ) +
     labs(
       title = panel_title,
       x = "Trimestres",
@@ -518,18 +544,19 @@ plot_measure <- function(data, panel_title) {
 
 plot_lev <- plot_measure(
   plot_data %>% dplyr::filter(measure == "leverage"),
-  "Panel (a): Heterogeneidad por apalancamiento"
+  "Panel (a): Heterogeneidad por apalancamiento",
+  common_horizons
 )
 
 plot_dd <- plot_measure(
   plot_data %>% dplyr::filter(measure == "default_distance"),
-  "Panel (b): Heterogeneidad por distancia al default"
+  "Panel (b): Heterogeneidad por distancia al default",
+  common_horizons
 )
 
 comparison_plot <- (plot_lev | plot_dd) +
   patchwork::plot_annotation(
-    title = paste0(
-      "Figura comparativa: Respuesta dinámica de la inversión ante un shock monetario\n",
+    title = paste0("Figura comparativa: Respuesta dinámica de la inversión ante un shock monetario\n",
       "Simulaciones del modelo vs evidencia empírica"
     )
   )
