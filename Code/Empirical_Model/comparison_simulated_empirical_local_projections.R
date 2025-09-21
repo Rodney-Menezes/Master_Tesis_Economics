@@ -44,6 +44,8 @@ shock_length <- 12
 shock_size   <- -0.0025
 shock_decay  <- 0.9
 shock_scale  <- -4
+# Probabilidad de winsorización para las variables financieras
+winsor_prob  <- 0.005
 
 # Directorios y rutas de archivos
 default_sim_dir   <- "C:/Users/joser/Documents"
@@ -106,20 +108,27 @@ prepare_panel <- function(file_path) {
   df <- raw %>%
     dplyr::filter(in_sample == 1) %>%
     dplyr::arrange(firm_id, quarter_id)
-  
+
   df <- df %>%
     dplyr::mutate(
       log_capital = ifelse(capital > 0, log(capital), NA_real_),
       leverage = dplyr::if_else(capital != 0, debt / capital, NA_real_),
       cash_to_capital = dplyr::if_else(capital != 0, cash / capital, NA_real_)
     )
-  
+
   df %>%
+    dplyr::mutate(
+      leverage_win = winsorize(leverage),
+      cash_to_capital_win = winsorize(cash_to_capital)
+    ) %>%
     dplyr::group_by(firm_id) %>%
+    dplyr::arrange(quarter_id, .by_group = TRUE) %>%
     dplyr::mutate(
       lag_log_capital = dplyr::lag(log_capital),
-      lag_leverage = dplyr::lag(leverage),
-      lag_dd = dplyr::lag(cash_to_capital)
+      lev_dm = leverage_win - mean(leverage_win, na.rm = TRUE),
+      dd_dm = cash_to_capital_win - mean(cash_to_capital_win, na.rm = TRUE),
+      lag_lev_dm = dplyr::lag(lev_dm),
+      lag_dd_dm = dplyr::lag(dd_dm)
     ) %>%
     dplyr::ungroup()
 }
@@ -230,8 +239,8 @@ compute_simulated_dynamics <- function(panel_dir, horizons) {
     df <- df %>%
       dplyr::mutate(
         shock = shock_series[quarter_id],
-        lev_shock = lag_leverage * shock,
-        dd_shock = lag_dd * shock
+        lev_shock = lag_lev_dm * shock,
+        dd_shock = lag_dd_dm * shock
       )
     
     message("  • ", basename(path), " (t_pre = ", t_pre, ")")
@@ -276,7 +285,10 @@ compute_simulated_dynamics <- function(panel_dir, horizons) {
 # ------------------------------
 # Funciones auxiliares (panel empírico)
 # ------------------------------
-winsorize <- function(x, p = 0.005) {
+winsorize <- function(x, p = winsor_prob) {
+  if (all(is.na(x))) {
+    return(x)
+  }
   lo <- stats::quantile(x, p, na.rm = TRUE)
   hi <- stats::quantile(x, 1 - p, na.rm = TRUE)
   pmin(pmax(x, lo), hi)
