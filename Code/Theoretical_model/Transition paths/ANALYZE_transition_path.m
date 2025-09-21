@@ -516,39 +516,6 @@ if isfinite(baselineInteractionDefault) && abs(baselineInteractionDefault) > eps
         interactionDistIRF  = 100 * (interactionDistLevel / baselineInteractionDefault - 1);
 end
 
-figure
-
-h               = gcf;
-h.PaperUnits    = 'inches';
-h.PaperPosition = [0 0 13 4];
-
-subplot(1,2,1)
-hold on
-plot(vTime,interactionLevIRF,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
-plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
-xlim([1 12])
-set(gcf,'color','w')
-xlabel('Quarters','interpreter','latex')
-ylabel('$\%$ deviation','interpreter','latex')
-grid on
-title('Interaction: Investment $\times$ leverage','interpreter','latex','fontsize',14)
-hold off
-
-subplot(1,2,2)
-hold on
-plot(vTime,interactionDistIRF,'linewidth',1.5,'linestyle','-','color',[8/255,62/255,118/255])
-plot(vTime,zeros(T,1),'linewidth',1.5,'linestyle','--','color','k')
-xlim([1 12])
-set(gcf,'color','w')
-xlabel('Quarters','interpreter','latex')
-ylabel('$\%$ deviation','interpreter','latex')
-grid on
-title('Interaction: Investment $\times$ distance to default','interpreter','latex','fontsize',14)
-hold off
-
-print('../Results/heterogeneity_channels_average.eps','-depsc')
-
-
 %----------------------------------------------------------------
 % Group-to-group comparisons for leverage and default distance
 %----------------------------------------------------------------
@@ -580,73 +547,6 @@ rel_far_vs_near(validDefMask) = 100 * (farDefSeries(validDefMask) ./ nearDefSeri
 rel_near_vs_far(validDefMask) = 100 * (nearDefSeries(validDefMask) ./ farDefSeries(validDefMask) - 1);
 gap_sym_def(validDefMask)     = 100 * (nearDefSeries(validDefMask) - farDefSeries(validDefMask)) ./ ...
                                         ((nearDefSeries(validDefMask) + farDefSeries(validDefMask)) / 2);
-
-comparisonColors = struct('groupA',[0 112/255 192/255],'groupB',[217/255 83/255 25/255]);
-
-% Figure: leverage group comparison
-figure
-h               = gcf;
-h.PaperUnits    = 'inches';
-h.PaperPosition = [0 0 10 6];
-set(h,'color','w')
-
-subplot(2,1,1)
-hold on
-plot(vTime,rel_low_vs_high,'LineWidth',1.5,'Color',comparisonColors.groupA)
-plot(vTime,rel_high_vs_low,'LineWidth',1.5,'Color',comparisonColors.groupB)
-yline(0,'k--','LineWidth',1.5)
-hold off
-box on
-xlabel('Trimestres')
-ylabel('% (grupo A vs grupo B)')
-title('Leverage: comparación directa Low vs High')
-legend({'Low / High','High / Low'},'Location','best')
-
-subplot(2,1,2)
-hold on
-plot(vTime,gap_sym_lev,'LineWidth',1.5,'Color',comparisonColors.groupB)
-yline(0,'k--','LineWidth',1.5)
-hold off
-box on
-xlabel('Trimestres')
-ylabel('% sobre media de ambos')
-title('Leverage: brecha simétrica (High - Low)')
-
-print('../Results/heterogeneity_gap_leverage_group_vs_group.eps','-depsc')
-
-% Figure: default distance group comparison
-figure
-h               = gcf;
-h.PaperUnits    = 'inches';
-h.PaperPosition = [0 0 10 6];
-set(h,'color','w')
-
-subplot(2,1,1)
-hold on
-plot(vTime,rel_far_vs_near,'LineWidth',1.5,'Color',comparisonColors.groupA)
-plot(vTime,rel_near_vs_far,'LineWidth',1.5,'Color',comparisonColors.groupB)
-yline(0,'k--','LineWidth',1.5)
-hold off
-box on
-xlabel('Trimestres')
-ylabel('% (grupo A vs grupo B)')
-title('Default distance: comparación directa Far vs Near')
-legend({'Far / Near','Near / Far'},'Location','best')
-
-subplot(2,1,2)
-hold on
-plot(vTime,gap_sym_def,'LineWidth',1.5,'Color',comparisonColors.groupB)
-yline(0,'k--','LineWidth',1.5)
-hold off
-box on
-xlabel('Trimestres')
-ylabel('% sobre media de ambos')
-title('Default distance: brecha simétrica (Near - Far)')
-
-print('../Results/heterogeneity_gap_defaultdistance_group_vs_group.eps','-depsc')
-
-
-
 
 %----------------------------------------------------------------
 % Simulate panel of firms along transition path
