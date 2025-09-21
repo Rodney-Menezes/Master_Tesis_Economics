@@ -542,7 +542,7 @@ csvwrite('mTransitionPanel_116.csv',mTransitionPanel_116);
 %----------------------------------------------------------------
 
 try
-        horizons_local_projection   = 0:8;
+        horizons_local_projection   = 0:12;
         shock_parameters_lp = struct('length', 12, 'size', -0.0025, ...
                                      'decay', 0.5, 'scale', -4);
 
@@ -1066,8 +1066,8 @@ for iPanel = 1:numel(measure_order)
         hold off
 end
 
-sgtitle({'Figura 1: Heterogeneidad financiera en la din\''amica de la inversi\''on', ...
-         'ante un shock monetario expansivo'}, 'Interpreter','latex','FontSize',14);
+sgtitle({'FHeterogeneidad financiera en la dinamica de la inversion ante un shock monetario expansivo'...
+         'con datos simulados con el modelo teorico'}, 'Interpreter','latex','FontSize',14);
 
 plot_path = fullfile(results_directory,'transition_panel_local_projections_simple.png');
 print(fig, plot_path, '-dpng', '-r300');
