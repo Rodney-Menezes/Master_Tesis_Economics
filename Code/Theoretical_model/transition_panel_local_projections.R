@@ -106,11 +106,9 @@ prepare_panel <- function(file_path) {
   df <- df %>%
     dplyr::group_by(firm_id) %>%
     dplyr::mutate(
-      lev_within = leverage - mean(leverage, na.rm = TRUE),
-      dd_within = cash_to_capital - mean(cash_to_capital, na.rm = TRUE),
       lag_log_capital = dplyr::lag(log_capital),
-      lag_lev_within = dplyr::lag(lev_within),
-      lag_dd_within = dplyr::lag(dd_within)
+      lag_leverage = dplyr::lag(leverage),
+      lag_dd = dplyr::lag(cash_to_capital)
     ) %>%
     dplyr::ungroup()
 
@@ -190,8 +188,8 @@ results <- purrr::map_dfr(panel_files, function(path) {
   df <- df %>%
     dplyr::mutate(
       shock = shock_series[quarter_id],
-      lev_shock = lag_lev_within * shock,
-      dd_shock = lag_dd_within * shock
+      lev_shock = lag_leverage * shock,
+      dd_shock = lag_dd * shock
     )
 
   message("  • ", basename(path), " (t_pre = ", t_pre, ")")
