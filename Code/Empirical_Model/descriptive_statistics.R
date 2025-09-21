@@ -314,10 +314,10 @@ if ("size_raw" %in% names(df)) {
 }
 
 # ---------------------------------------------------
-# 5) Distribuciones y percentiles de leverage y dd
+# 5) Distribuciones y percentiles de leverage, dd y dlog_capital
 # ---------------------------------------------------
 
-distribution_vars <- intersect(c("leverage", "dd"), names(df))
+distribution_vars <- intersect(c("leverage", "dd", "dlog_capital"), names(df))
 if (length(distribution_vars) > 0) {
   distribucion_tabla <- do.call(
     rbind,
@@ -327,7 +327,7 @@ if (length(distribution_vars) > 0) {
   print(distribucion_tabla)
 }
 
-std_cols <- intersect(c("leverage_std", "dd_std"), names(df))
+std_cols <- intersect(c("leverage_std", "dd_std", "dlog_capital_std"), names(df))
 if (length(std_cols) > 0) {
   dist_long <- df %>%
     select(all_of(std_cols)) %>%
@@ -335,7 +335,8 @@ if (length(std_cols) > 0) {
     drop_na(valor) %>%
     mutate(variable = recode(variable,
                              leverage_std = "Leverage (std)",
-                             dd_std = "Distance to Default (std)"))
+                             dd_std = "Distance to Default (std)",
+                             dlog_capital_std = "Δ log capital (std)"))
 } else {
   dist_long <- data.frame(variable = character(), valor = numeric(),
                           stringsAsFactors = FALSE)
@@ -346,7 +347,7 @@ if (nrow(dist_long) > 0) {
     geom_histogram(alpha = 0.6, bins = 30, position = "identity") +
     facet_wrap(~variable, scales = "free_y") +
     labs(
-      title = "Distribuciones estandarizadas de leverage y dd",
+      title = "Distribuciones estandarizadas de leverage, dd y Δ log capital",
       x = "Valor estandarizado",
       y = "Frecuencia"
     ) +
@@ -358,7 +359,7 @@ if (nrow(dist_long) > 0) {
     geom_violin(trim = FALSE, alpha = 0.7) +
     geom_boxplot(width = 0.12, fill = "white", outlier.size = 0.6) +
     labs(
-      title = "Distribuciones estandarizadas de leverage y dd",
+      title = "Distribuciones estandarizadas de leverage, dd y Δ log capital",
       x = "",
       y = "Valor estandarizado"
     ) +
