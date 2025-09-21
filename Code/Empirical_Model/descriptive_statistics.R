@@ -84,7 +84,36 @@ base_dir <- "C:/Users/joser/Downloads/Tesis Master/Data Tesis/Data Final"
 df <- read_dta(file.path(base_dir, "Data_Base_final.dta")) %>%
   mutate(
     dateq = as.yearqtr(dateq)  # convierte tu variable trimestral
-  )
+  ) %>%
+  arrange(name, dateq)
+
+if (!"dlog_capital" %in% names(df) &&
+    all(c("name", "dateq", "real_capital") %in% names(df))) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq, .by_group = TRUE) %>%
+    mutate(
+      ratio_cap = real_capital / lag(real_capital),
+      dlog_capital = if_else(is.finite(ratio_cap) & ratio_cap > 0,
+                             log(ratio_cap), NA_real_)
+    ) %>%
+    ungroup() %>%
+    select(-ratio_cap)
+} else if (!"dlog_capital" %in% names(df)) {
+  df$dlog_capital <- NA_real_
+}
+
+if (!"dln_saleq" %in% names(df) &&
+    all(c("name", "dateq", "saleq") %in% names(df))) {
+  df <- df %>%
+    group_by(name) %>%
+    arrange(dateq, .by_group = TRUE) %>%
+    mutate(
+      dln_saleq = if_else(saleq > 0 & lag(saleq) > 0,
+                          log(saleq) - log(lag(saleq)), NA_real_)
+    ) %>%
+    ungroup()
+}
 
 # 1.1) Winsorización (0.5%) y variables derivadas --------------------------
 vars_to_winsorize <- c(
@@ -129,6 +158,10 @@ if (all(c("atq", "saleq") %in% names(df))) {
     mutate(size_raw = winsorize_vec(size_raw))
 } else {
   df$size_raw <- NA_real_
+}
+
+if (!"log_size" %in% names(df) && "size_raw" %in% names(df)) {
+  df <- df %>% mutate(log_size = size_raw)
 }
 
 if ("leverage" %in% names(df)) {
@@ -347,35 +380,37 @@ if (length(corr_vars) >= 2) {
 # 7) Evolución temporal del shock
 # ---------------------------------------------------
 
-shock_ts <- df1 %>%
-  group_by(dateq) %>%
-  summarise(
-    HF_shock = mean_if_any(HF_shock),
-    Q_shock = mean_if_any(Q_shock),
-    .groups = "drop"
-  ) %>%
-  arrange(dateq)
+shock_vars <- intersect(c("HF_shock", "Q_shock"), names(df))
 
-cat("\n--- Evolución temporal promedio de los shocks (winsorizados) ---\n")
-print(shock_ts)
+if (length(shock_vars) > 0) {
+  shock_ts <- df %>%
+    group_by(dateq) %>%
+    summarise(across(all_of(shock_vars), mean_if_any), .groups = "drop") %>%
+    arrange(dateq)
 
-if (nrow(shock_ts) > 0) {
-  shock_ts_long <- shock_ts %>%
-    pivot_longer(cols = c(HF_shock, Q_shock),
-                 names_to = "Shock",
-                 values_to = "Valor")
+  cat("\n--- Evolución temporal promedio de los shocks (winsorizados) ---\n")
+  print(shock_ts)
 
-  shock_plot <- ggplot(shock_ts_long, aes(x = dateq, y = Valor, color = Shock)) +
-    geom_line(size = 1) +
-    geom_point(size = 1.5) +
-    labs(
-      title = "Evolución temporal de los shocks monetarios",
-      x = "Trimestre",
-      y = "Shock (winsorizado, %)",
-      color = "Serie"
-    ) +
-    theme_minimal()
-  print(shock_plot)
+  if (nrow(shock_ts) > 0) {
+    shock_ts_long <- shock_ts %>%
+      pivot_longer(cols = all_of(shock_vars),
+                   names_to = "Shock",
+                   values_to = "Valor")
+
+    shock_plot <- ggplot(shock_ts_long, aes(x = dateq, y = Valor, color = Shock)) +
+      geom_line(size = 1) +
+      geom_point(size = 1.5) +
+      labs(
+        title = "Evolución temporal de los shocks monetarios",
+        x = "Trimestre",
+        y = "Shock (winsorizado, %)",
+        color = "Serie"
+      ) +
+      theme_minimal()
+    print(shock_plot)
+  } else {
+    cat("\nNo hay observaciones para graficar la evolución temporal de los shocks.\n")
+  }
 } else {
-  cat("\nNo hay observaciones para graficar la evolución temporal de los shocks.\n")
+  cat("\nNo hay series de shocks disponibles en la base de datos.\n")
 }
