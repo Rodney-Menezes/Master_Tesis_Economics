@@ -275,7 +275,7 @@ p_lev_nocy <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
   labs(
     title    = "Panel (a): Heterogeneidad por apalancamiento",
     x        = "Trimestres",
-    y        = "Efecto acumulado en Δlog(K)"
+    y        = "Efecto acumulado en la inversión"
   ) +
   theme_minimal()
 
@@ -289,7 +289,7 @@ p_dd_nocy <- ggplot(dyn_dd_nocy, aes(x = horizon, y = beta)) +
   labs(
     title    = "Panel (b): Heterogeneidad por distancia al default",
     x        = "Trimestres",
-    y        = "Efecto acumulado en Δlog(K)"
+    y        = "Efecto acumulado en la inversión"
   ) +
   theme_minimal()
 
@@ -365,7 +365,7 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Figura 2: Respuesta Dinámica de la Inversión ante un Shock Monetario",
     x     = "Trimestres",
-    y     = "Efecto acumulado en Δlog(K)"
+    y     = "Efecto acumulado en la inversión"
   ) +
   theme_minimal()
 
@@ -491,7 +491,7 @@ p11a <- ggplot(coef_lev_lag, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Panel (a): Heterogeneidad por apalancamiento",
     x     = "Trimestres",
-    y     = "Efecto acumulado en Δlog(K) residual"
+    y     = "Efecto acumulado en la inversión residual"
   ) +
   theme_minimal()
 
@@ -505,7 +505,7 @@ p11b <- ggplot(coef_dd_lag, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Panel (b): Heterogeneidad por distancia al default",
     x     = "Trimestres",
-    y     = "Efecto acumulado en Δlog(K) residual"
+    y     = "Efecto acumulado en la inversión residual"
   ) +
   theme_minimal()
 
@@ -592,7 +592,7 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Figura 4: Respuesta Dinámica de la Inversión residual ante un Shock Monetario",
     x     = "Trimestres",
-    y     = "Efecto acumulado en Δlog(K) residual"
+    y     = "Efecto acumulado en la inversión residual"
   ) +
   theme_minimal()
 
@@ -712,7 +712,7 @@ ggplot(coef_size, aes(x = horizon, y = beta_shock)) +
   labs(
     title = "Figura 5: Heterogeneidad de la inversion por tamaño de empresa",
     x     = "Trimestres",
-    y     = "Efecto acumulado en Δlog(K)"
+    y     = "Efecto acumulado en la inversión"
   ) +
   theme_minimal()
 
@@ -841,7 +841,7 @@ p13a <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_size)) +
   geom_ribbon(aes(ymin = beta_size - 1.645 * se_size,
                   ymax = beta_size + 1.645 * se_size),
               fill = "darkgreen", alpha = 0.2) +
-    labs(title = "Panel (a): Heterogeneidad por tamaño", x = "Trimestres", y = "Efecto acumulado en Δlog(K)") +
+    labs(title = "Panel (a): Heterogeneidad por tamaño", x = "Trimestres", y = "Efecto acumulado en la inversión") +
   theme_minimal()
 
 # 5b) Gráfico Leverage × Shock
@@ -850,7 +850,7 @@ p13b <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_lev)) +
   geom_ribbon(aes(ymin = beta_lev - 1.645 * se_lev,
                   ymax = beta_lev + 1.645 * se_lev),
               fill = "firebrick", alpha = 0.2) +
-    labs(title = "Panel (b): Heterogeneidad por apalancamiento", x = "Trimestres", y = "Efecto acumulado en Δlog(K)") +
+    labs(title = "Panel (b): Heterogeneidad por apalancamiento", x = "Trimestres", y = "Efecto acumulado en la inversión") +
   theme_minimal()
 
 # 5c) Gráfico DD × Shock
@@ -859,7 +859,7 @@ p13c <- ggplot(dd_size_coefs, aes(x = horizon, y = beta_dd)) +
   geom_ribbon(aes(ymin = beta_dd - 1.645 * se_dd,
                   ymax = beta_dd + 1.645 * se_dd),
               fill = "steelblue", alpha = 0.2) +
-    labs(title = "Panel (c): Heterogeneidad por distancia al default", x = "Trimestres", y = "Efecto acumulado en Δlog(K)") +
+    labs(title = "Panel (c): Heterogeneidad por distancia al default", x = "Trimestres", y = "Efecto acumulado en la inversión") +
   theme_minimal()
 
 # 6) Montaje final 3×1
