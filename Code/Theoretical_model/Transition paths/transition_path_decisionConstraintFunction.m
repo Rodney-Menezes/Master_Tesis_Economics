@@ -57,5 +57,5 @@ debtPrice           = (sdf / inflation_prime) * min(1,max(0,mShocksTransition(iP
 % Compute dividends and return constraint
 %---------------------------------------------------------------
 
-c		= q * kPrime - mCashGrid(iProd,iCash) - debtPrice * bPrime;
-ceq		= [];
+ceq		= q * kPrime - mCashGrid(iProd,iCash) - debtPrice * bPrime;
+c		= [];
