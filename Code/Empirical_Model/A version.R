@@ -120,8 +120,9 @@ df <- df %>%
   dplyr::arrange(dateq, .by_group = TRUE) %>%
   dplyr::mutate(
     ratio_cap    = real_capital / dplyr::lag(real_capital),
-    dlog_capital = dplyr::if_else(is.finite(ratio_cap) & ratio_cap > 0,
-                                  log(ratio_cap), NA_real_)
+    ratio_cap    = dplyr::if_else(is.finite(ratio_cap) & ratio_cap > 0,
+                                  ratio_cap, NA_real_),
+    dlog_capital = log(ratio_cap)
   ) %>%
   dplyr::ungroup() %>%
   dplyr::select(-ratio_cap) %>%
@@ -135,17 +136,21 @@ df <- df %>%
 df <- df %>%
   prep_fin_vars(p = 0.005)
 
-df <- df %>%
-  dplyr::group_by(Country) %>%
-  dplyr::arrange(dateq, .by_group = TRUE) %>%
-  dplyr::mutate(
-    L1_dlog_gdp = dplyr::lag(dlog_gdp, 1)
-  ) %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(
-    lev_gdp = L1_lev_dm * L1_dlog_gdp,
-    dd_gdp  = L1_dd_dm  * L1_dlog_gdp
-  )
+if ("dlog_gdp" %in% names(df)) {
+  df <- df %>%
+    dplyr::group_by(Country) %>%
+    dplyr::arrange(dateq, .by_group = TRUE) %>%
+    dplyr::mutate(
+      L1_dlog_gdp = dplyr::lag(dlog_gdp, 1)
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(
+      lev_gdp = L1_lev_dm * L1_dlog_gdp,
+      dd_gdp  = L1_dd_dm  * L1_dlog_gdp
+    )
+} else {
+  warning("No existe 'dlog_gdp'; se omiten rezagos e interacciones macroeconómicas.")
+}
 
 # Niveles base por firma y país y dummies ex-ante (apalancamiento/distancia al default)
 firm_fin_base <- df %>%
