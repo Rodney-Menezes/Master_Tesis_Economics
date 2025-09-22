@@ -43,7 +43,7 @@ emp_horizons <- 0:12
 shock_length <- 12
 shock_size   <- -0.0025
 shock_decay  <- 0.9
-shock_scale  <- -12
+shock_scale  <- -4
 # Probabilidad de winsorización para las variables financieras
 winsor_prob  <- 0.005
 
