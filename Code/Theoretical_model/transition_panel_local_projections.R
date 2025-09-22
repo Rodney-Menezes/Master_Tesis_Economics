@@ -283,11 +283,12 @@ if (nrow(summary_results) == 0) {
   plot_results <- summary_results %>%
     dplyr::mutate(
       ribbon_low = coefficient - 1.645 * std_error,
-      ribbon_high = coefficient + 1.645 * std_error
+      ribbon_high = coefficient + 1.645 * std_error,
+      plot_horizon = horizon - 1
     )
 
   build_panel_plot <- function(data, panel_title, colour, max_horizon) {
-    ggplot(data, aes(x = horizon, y = coefficient)) +
+    ggplot(data, aes(x = plot_horizon, y = coefficient)) +
       geom_ribbon(
         aes(ymin = ribbon_low, ymax = ribbon_high),
         fill = colour,
@@ -296,8 +297,9 @@ if (nrow(summary_results) == 0) {
       geom_line(linewidth = 1, colour = colour) +
       geom_point(size = 2, colour = colour) +
       scale_x_continuous(
-        breaks = seq_len(max_horizon),
-        limits = c(1, max_horizon)
+        breaks = 0:(max_horizon - 1),
+        limits = c(0, max_horizon - 1),
+        labels = function(x) x + 1
       ) +
       labs(
         title = panel_title,
