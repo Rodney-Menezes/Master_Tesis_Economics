@@ -105,6 +105,12 @@ add_lagged_controls <- function(df, vars, lag = 1) {
     dplyr::ungroup()
 }
 
+# Filtra controles disponibles con al menos un valor observado
+filter_valid_controls <- function(df, vars) {
+  vars_present <- intersect(vars, names(df))
+  vars_present[vapply(vars_present, function(var) any(!is.na(df[[var]])), logical(1))]
+}
+
 
 # ===========================================
 # Carga de datos y preprocesamiento consistente
@@ -249,8 +255,8 @@ if (!all(vars_cap %in% names(df))) {
 }
 
 # 4) Definir controles y cadena de regresores
-controls_firm     <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro    <- intersect(c("lev_gdp", "dd_gdp"), names(df_dyn_nocy))
+controls_firm     <- filter_valid_controls(df_dyn_nocy, c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win"))
+controls_macro    <- filter_valid_controls(df_dyn_nocy, c("lev_gdp", "dd_gdp"))
 controls_vec_nocy <- c(controls_firm, controls_macro)
 rhs_lev_nocy      <- paste(c("lev_shock", controls_vec_nocy), collapse = " + ")
 rhs_dd_nocy       <- paste(c("d2d_shock", controls_vec_nocy), collapse = " + ")
@@ -353,8 +359,8 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 
 # 4) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
-controls_firm <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro <- intersect(c("lev_gdp", "dd_gdp"), names(df_dyn))
+controls_firm <- filter_valid_controls(df_dyn, c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win"))
+controls_macro <- filter_valid_controls(df_dyn, c("lev_gdp", "dd_gdp"))
 rhs_terms_avg <- paste(c("shock_exp", "lev_shock", "d2d_shock", controls_firm, controls_macro),
                        collapse = " + ")
 
