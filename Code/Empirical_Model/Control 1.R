@@ -25,6 +25,13 @@ library(tidyr)
 library(kableExtra)
 
 
+# ======================
+# Macro control settings
+# ======================
+macro_control_vars        <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+macro_control_vars_lagged <- paste0("L1_", macro_control_vars)
+
+
 
 # =========================
 # Helpers (winsor/de-mean)
@@ -162,6 +169,28 @@ firm_fin_base <- df %>%
 df <- df %>%
   dplyr::left_join(firm_fin_base, by = c("Country", "name"))
 
+# ==================================================
+# Crear controles macroeconómicos rezagados (L1)
+# ==================================================
+macro_controls_present <- intersect(macro_control_vars, names(df))
+if (length(macro_controls_present) > 0) {
+  macro_lags <- df %>%
+    dplyr::select(dplyr::all_of(c("Country", "dateq", macro_controls_present))) %>%
+    dplyr::distinct() %>%
+    dplyr::arrange(Country, dateq) %>%
+    dplyr::group_by(Country) %>%
+    dplyr::mutate(dplyr::across(
+      dplyr::all_of(macro_controls_present),
+      ~ dplyr::lag(.x, 1),
+      .names = "L1_{.col}"
+    )) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(Country, dateq, dplyr::starts_with("L1_"))
+
+  df <- df %>%
+    dplyr::left_join(macro_lags, by = c("Country", "dateq"))
+}
+
 # =================================================================
 # Figure 1: Respuesta dinámica de la inversión al shock monetario
 # =================================================================
@@ -225,10 +254,10 @@ if (!all(vars_cap %in% names(df))) {
 }
 
 # 4) Definir controles y cadena de regresores
-controls_firm   <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro  <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn_nocy))
-controls_vec_nocy <- c(controls_firm, controls_macro)
-all_controls_nocy <- paste(controls_vec_nocy, collapse = " + ")
+controls_firm   <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")␊
+controls_macro  <- intersect(macro_control_vars_lagged, names(df_dyn_nocy))
+controls_vec_nocy <- c(controls_firm, controls_macro)␊
+all_controls_nocy <- paste(controls_vec_nocy, collapse = " + ")␊
 
 # 5) Estimar dinámicas h = 0…12 sin componente cíclico
 res_lev_nocy <- map(0:12, function(h) {
@@ -329,7 +358,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 # 4) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
 controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
+controls_macro <- intersect(macro_control_vars_lagged, names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
 # 5) Estimar respuesta promedio al shock (horizonte 0–12)
@@ -394,15 +423,15 @@ if (!"Ldl_capital" %in% names(df)) {
 # ----------------------------------------------------------
 df <- prep_fin_vars(df)
 
-# 3) Interacciones con shock y con dlog_gdp (si existe)
-# ------------------------------------------------------
-if ("dlog_gdp" %in% names(df)) {
-  df <- df %>%
-    mutate(
-      lev_shock_gdp = L1_lev_dm * dlog_gdp,
-      d2d_shock_gdp = L1_dd_dm  * dlog_gdp
-    )
-}
+# 3) Interacciones con shock y con L1_dlog_gdp (si existe)
+# ------------------------------------------------------␊
+if ("L1_dlog_gdp" %in% names(df)) {
+  df <- df %>%␊
+    mutate(␊
+      lev_shock_gdp = L1_lev_dm * L1_dlog_gdp,
+      d2d_shock_gdp = L1_dd_dm  * L1_dlog_gdp
+    )␊
+}␊
 
 df <- df %>%
   mutate(
@@ -433,7 +462,7 @@ df_dyn11 <- if (!all(vars_cap11 %in% names(df))) {
 # 5) Definir controles firm-level y macro
 # --------------------------------------
 controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn11))
+controls_macro <- intersect(macro_control_vars_lagged, names(df_dyn11))
 base_controls  <- c(controls_firm, controls_macro)
 
 # 6) Estimar dinámicas controlando Ldl_capital
@@ -556,7 +585,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 # 5) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
 controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
+controls_macro <- intersect(macro_control_vars_lagged, names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
 # 6) Estimar respuesta promedio al shock (horizonte 0–12) con Ldl_capital
@@ -626,14 +655,14 @@ df_cntl <- df_cntl %>%
 
 # 2) Crear interacciones size × GDP y size × shock
 # --------------------------------------------------------
-if ("dlog_gdp" %in% names(df_cntl)) {
-  df_cntl <- df_cntl %>%
-    mutate(
-      size_gdp   = if (!"size_gdp"   %in% names(.)) size_win * dlog_gdp else size_gdp
-    )
-} else {
-  warning("No existe 'dlog_gdp'; se omite creación de 'size_gdp'.")
-}
+if ("L1_dlog_gdp" %in% names(df_cntl)) {
+  df_cntl <- df_cntl %>%␊
+    mutate(␊
+      size_gdp   = if (!"size_gdp"   %in% names(.)) size_win * L1_dlog_gdp else size_gdp
+    )␊
+} else {␊
+  warning("No existe 'L1_dlog_gdp'; se omite creación de 'size_gdp'.")
+}␊
 
 if ("shock_exp" %in% names(df_cntl)) {
   df_cntl <- df_cntl %>%
@@ -668,13 +697,13 @@ df_dyn12 <- if (!all(vars_cum %in% names(df_cntl))) {
 # 4) Definir controles firm-level y macro presentes
 # --------------------------------------------------
 controls_firm  <- c("L1_rsales_g_win", "L1_current_ratio_win")
-controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
-present_macro  <- intersect(controls_macro, names(df_dyn12))
-if (length(present_macro) < length(controls_macro)) {
-  warning("Faltan controles macro: ",
-          paste(setdiff(controls_macro, present_macro), collapse = ", "),
-          ". Se omitirán.")
-}
+controls_macro <- macro_control_vars_lagged
+present_macro  <- intersect(controls_macro, names(df_dyn12))␊
+if (length(present_macro) < length(controls_macro)) {␊
+  warning("Faltan controles macro rezagados: ",
+          paste(setdiff(controls_macro, present_macro), collapse = ", "),␊
+          ". Se omitirán.")␊
+}␊
 all_controls <- paste(c(controls_firm, present_macro), collapse = " + ")
 
 
@@ -735,9 +764,9 @@ df_cntl13 <- df_cntl13 %>%
   dplyr::select(-size_raw) %>%
   prep_fin_vars()
 
-# 2) Crear interacciones con shock y dlog_gdp
-# -------------------------------------------
-has_gdp_cntl13 <- "dlog_gdp" %in% names(df_cntl13)
+# 2) Crear interacciones con shock y L1_dlog_gdp
+# -------------------------------------------␊
+has_gdp_cntl13 <- "L1_dlog_gdp" %in% names(df_cntl13)
 
 if (!"shock_exp" %in% names(df_cntl13)) {
   stop("Falta la variable 'shock_exp' en el data frame.")
@@ -750,16 +779,16 @@ df_cntl13 <- df_cntl13 %>%
     d2d_shock  = L1_dd_dm  * shock_exp
   )
 
-if (has_gdp_cntl13) {
-  df_cntl13 <- df_cntl13 %>%
-    dplyr::mutate(
-      size_gdp      = size_win * dlog_gdp,
-      lev_shock_gdp = L1_lev_dm * dlog_gdp,
-      d2d_shock_gdp = L1_dd_dm  * dlog_gdp
-    )
-} else {
-  warning("No existe 'dlog_gdp'; se omiten interacciones con el ciclo.")
-}
+if (has_gdp_cntl13) {␊
+  df_cntl13 <- df_cntl13 %>%␊
+    dplyr::mutate(␊
+      size_gdp      = size_win * L1_dlog_gdp,
+      lev_shock_gdp = L1_lev_dm * L1_dlog_gdp,
+      d2d_shock_gdp = L1_dd_dm  * L1_dlog_gdp
+    )␊
+} else {␊
+  warning("No existe 'L1_dlog_gdp'; se omiten interacciones con el ciclo.")
+}␊
 
 # 3) Construir dlog_capital y dinámicas cumFh_dlog_capital
 # ---------------------------------------------------------
@@ -784,7 +813,7 @@ df_dyn13 <- if (!all(vars13 %in% names(df_cntl13))) {
 # 4) Definir controles firm-level y macro
 # ----------------------------------------
 controls_firm13  <- c("L1_rsales_g_win", "L1_current_ratio_win")
-controls_macro13 <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn13))
+controls_macro13 <- intersect(macro_control_vars_lagged, names(df_dyn13))
 controls_vec13   <- c(controls_firm13, controls_macro13)
 rhs_lev13_terms  <- c("size_shock", "lev_shock", if (has_gdp_cntl13) "lev_shock_gdp" else NULL, controls_vec13)
 rhs_dd13_terms   <- c("size_shock", "d2d_shock", if (has_gdp_cntl13) "d2d_shock_gdp" else NULL, controls_vec13)
