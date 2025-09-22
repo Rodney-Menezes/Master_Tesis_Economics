@@ -43,7 +43,7 @@ emp_horizons <- 0:12
 shock_length <- 12
 shock_size   <- -0.0025
 shock_decay  <- 0.9
-shock_scale  <- -4
+shock_scale  <- -12
 # Probabilidad de winsorización para las variables financieras
 winsor_prob  <- 0.005
 
@@ -537,7 +537,8 @@ plot_measure <- function(data, panel_title, horizons_axis) {
     scale_fill_manual(values = palette_colors) +
     scale_x_continuous(
       breaks = horizons_axis,
-      limits = range(horizons_axis)
+      limits = range(horizons_axis),
+      labels = function(x) x + 1
     ) +
     labs(
       title = panel_title,
