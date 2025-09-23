@@ -445,10 +445,10 @@ compute_empirical_dynamics <- function(data_path, horizons) {
     fixest::feols(
       as.formula(paste0(
         "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls,
-        " | name + sec + dateq"
+        " | name + sec + Country^dateq"
       )),
       data = df_dyn,
-      cluster = ~ Country + dateq + name
+      cluster = ~ Country^dateq
     )
   })
   
@@ -456,10 +456,10 @@ compute_empirical_dynamics <- function(data_path, horizons) {
     fixest::feols(
       as.formula(paste0(
         "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls,
-        " | name + sec + dateq"
+        " | name + sec + Country^dateq"
       )),
       data = df_dyn,
-      cluster = ~ Country + dateq + name
+      cluster = ~ Country^dateq
     )
   })
 
