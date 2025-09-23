@@ -86,11 +86,11 @@ prep_ctrl_var <- function(df, var_in, prefix = var_in, p = 0.005) {
 }
 
 # Crea rezagos (por defecto, un periodo) de los controles firm-level dentro de firma
-add_lagged_controls <- function(df, vars, lag = 1) {␊
-  vars_present <- intersect(vars, names(df))␊
-  if (length(vars_present) == 0) {␊
-    return(df)␊
-  }␊
+add_lagged_controls <- function(df, vars, lag = 1) {
+  vars_present <- intersect(vars, names(df))
+  if (length(vars_present) == 0) {
+    return(df)
+  }
 
   lag_prefix <- paste0("L", lag, "_")
 
@@ -103,31 +103,6 @@ add_lagged_controls <- function(df, vars, lag = 1) {␊
       .names = paste0(lag_prefix, "{.col}")
     )) %>%
     dplyr::ungroup()
-}
-
-
-# Extrae de forma segura un coeficiente y su error estándar asociado
-safe_coef <- function(model, term) {
-  coefs <- coef(model)
-  if (term %in% names(coefs)) {
-    return(unname(coefs[term]))
-  }
-  NA_real_
-}
-
-safe_se <- function(model, term) {
-  vc <- tryCatch(stats::vcov(model), error = function(e) NULL)
-  if (is.null(vc)) {
-    return(NA_real_)
-  }
-
-  rn <- rownames(vc)
-  cn <- colnames(vc)
-  if (!is.null(rn) && !is.null(cn) && term %in% rn && term %in% cn) {
-    return(sqrt(vc[term, term]))
-  }
-
-  NA_real_
 }
 
 
@@ -278,16 +253,16 @@ res_dd_nocy <- map(0:12, function(h) {
 })
 
 # 6) Extraer coeficientes y errores estándar
-dyn_lev_nocy <- tibble(␊
-  horizon = 0:12,␊
-  beta    = map_dbl(res_lev_nocy, ~ safe_coef(.x, "lev_shock")),
-  se      = map_dbl(res_lev_nocy, ~ safe_se(.x, "lev_shock"))
-)␊
-dyn_dd_nocy <- tibble(␊
-  horizon = 0:12,␊
-  beta    = map_dbl(res_dd_nocy, ~ safe_coef(.x, "d2d_shock")),
-  se      = map_dbl(res_dd_nocy, ~ safe_se(.x, "d2d_shock"))
-)␊
+dyn_lev_nocy <- tibble(
+  horizon = 0:12,
+  beta    = map_dbl(res_lev_nocy, ~ coef(.x)["lev_shock"]),
+  se      = map_dbl(res_lev_nocy, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
+)
+dyn_dd_nocy <- tibble(
+  horizon = 0:12,
+  beta    = map_dbl(res_dd_nocy, ~ coef(.x)["d2d_shock"]),
+  se      = map_dbl(res_dd_nocy, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
+)
 
 # 7) Graficar Figura 1
 p_lev_nocy <- ggplot(dyn_lev_nocy, aes(x = horizon, y = beta)) +
@@ -354,7 +329,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 # 4) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
 controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
+controls_macro <- intersect(c(), names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
 # 5) Estimar respuesta promedio al shock (horizonte 0–12)
@@ -363,19 +338,19 @@ res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
-    " ~ shock_exp + lev_shock + d2d_shock + ", all_controls,
-    " | name + sec + Country^dateq"
+    " ~ shock_exp + ", all_controls,
+    " | name + sec + Country + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country^dateq)
+  feols(fml, data = df_dyn, cluster = ~ name + dateq)
 })
 
 # 6) Extraer coeficientes y errores estándar para 'shock_exp'
 # -------------------------------------------------------
-avg_coefs <- tibble::tibble(␊
-  horizon    = 0:12,␊
-  beta_shock = map_dbl(res_avg, ~ safe_coef(.x, "shock_exp")),
-  se_shock   = map_dbl(res_avg, ~ safe_se(.x, "shock_exp"))
-)␊
+avg_coefs <- tibble::tibble(
+  horizon    = 0:12,
+  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp"]),
+  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp","shock_exp"]))
+)
 
 # 7) Graficar la respuesta promedio al shock
 # -------------------------------------------
@@ -395,7 +370,6 @@ p_avg <- ggplot(avg_coefs, aes(x = horizon, y = beta_shock)) +
   theme_minimal()
 
 print(p_avg)
-
 
 
 
@@ -492,17 +466,17 @@ res_dd_lag <- map(0:12, function(h) {
 
 # 7) Extraer coeficientes y errores para plot
 # --------------------------------------
-coef_lev_lag <- tibble(␊
-  horizon    = 0:12,␊
-  beta_shock = map_dbl(res_lev_lag, ~ safe_coef(.x, "lev_shock")),
-  se_shock   = map_dbl(res_lev_lag, ~ safe_se(.x, "lev_shock"))
-)␊
-␊
-coef_dd_lag <- tibble(␊
-  horizon    = 0:12,␊
-  beta_shock = map_dbl(res_dd_lag, ~ safe_coef(.x, "d2d_shock")),
-  se_shock   = map_dbl(res_dd_lag, ~ safe_se(.x, "d2d_shock"))
-)␊
+coef_lev_lag <- tibble(
+  horizon    = 0:12,
+  beta_shock = map_dbl(res_lev_lag, ~ coef(.x)["lev_shock"]),
+  se_shock   = map_dbl(res_lev_lag, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
+)
+
+coef_dd_lag <- tibble(
+  horizon    = 0:12,
+  beta_shock = map_dbl(res_dd_lag, ~ coef(.x)["d2d_shock"]),
+  se_shock   = map_dbl(res_dd_lag, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
+)
 
 # 8) Graficar respuestas dinámicas
 # --------------------------------------
@@ -581,7 +555,7 @@ df_dyn <- if (!all(vars_cap %in% names(df))) {
 # 5) Definir controles firm-level y macro contemporáneos
 # --------------------------------------------------------
 controls_firm  <- c("L1_rsales_g_win", "L1_size_raw", "L1_current_ratio_win")
-controls_macro <- intersect(c("dlog_gdp", "dlog_cpi", "unemp", "embigl"), names(df_dyn))
+controls_macro <- intersect(c(), names(df_dyn))
 all_controls   <- paste(c(controls_firm, controls_macro), collapse = " + ")
 
 # 6) Estimar respuesta promedio al shock (horizonte 0–12) con Ldl_capital
@@ -590,19 +564,19 @@ res_avg <- map(0:12, function(h) {
   dep_var <- paste0("cumF", h, "_dlog_capital")
   fml <- as.formula(paste0(
     dep_var,
-    " ~ shock_exp + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
-    " | name + sec + Country^dateq"
+    " ~ shock_exp + Ldl_capital + ", all_controls,
+    " | name + sec + Country + dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country^dateq)
+  feols(fml, data = df_dyn, cluster = ~ name + dateq)
 })
 
 # 7) Extraer coeficientes y errores estándar para 'shock_exp'
 # -------------------------------------------------------
-avg_coefs <- tibble::tibble(␊
-  horizon    = 0:12,␊
-  beta_shock = map_dbl(res_avg, ~ safe_coef(.x, "shock_exp")),
-  se_shock   = map_dbl(res_avg, ~ safe_se(.x, "shock_exp"))
-)␊
+avg_coefs <- tibble::tibble(
+  horizon    = 0:12,
+  beta_shock = map_dbl(res_avg, ~ coef(.x)["shock_exp"]),
+  se_shock   = map_dbl(res_avg, ~ sqrt(vcov(.x)["shock_exp","shock_exp"]))
+)
 
 # 8) Graficar la respuesta promedio al shock
 # -------------------------------------------
@@ -693,7 +667,7 @@ df_dyn12 <- if (!all(vars_cum %in% names(df_cntl))) {
 # 4) Definir controles firm-level y macro presentes
 # --------------------------------------------------
 controls_firm  <- c("L1_rsales_g_win", "L1_current_ratio_win")
-controls_macro <- c("dlog_gdp", "dlog_cpi", "unemp", "embigl")
+controls_macro <- c()
 present_macro  <- intersect(controls_macro, names(df_dyn12))
 if (length(present_macro) < length(controls_macro)) {
   warning("Faltan controles macro: ",
@@ -709,20 +683,20 @@ res_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars_cum[h+1], " ~ size_shock + ", all_controls,
-      " | name + sec + Country^dateq"
+      " | name + sec + Country + dateq"
     )),
     data    = df_dyn12,
-    cluster = ~ Country^dateq
+    cluster = ~ name + dateq
   )
 })
 
 # 6) Extraer coeficiente y error estándar de size_shock
 # ------------------------------------------------------
-coef_size <- tibble(␊
-  horizon    = 0:12,␊
-  beta_shock = map_dbl(res_size, ~ safe_coef(.x, "size_shock")),
-  se_shock   = map_dbl(res_size, ~ safe_se(.x, "size_shock"))
-)␊
+coef_size <- tibble(
+  horizon    = 0:12,
+  beta_shock = map_dbl(res_size, ~ coef(.x)["size_shock"]),
+  se_shock   = map_dbl(res_size, ~ sqrt(vcov(.x)["size_shock", "size_shock"]))
+)
 
 # 7) Graficar la dinámica de size_shock
 # --------------------------------------
@@ -844,21 +818,21 @@ res_dd_size <- map(0:12, function(h) {
 
 # 5) Extraer coeficientes y errores
 # ----------------------------------
-lev_size_coefs <- tibble(␊
-  horizon   = 0:12,␊
-  beta_size = map_dbl(res_lev_size, ~ safe_coef(.x, "size_shock")),
-  se_size   = map_dbl(res_lev_size, ~ safe_se(.x, "size_shock")),
-  beta_lev  = map_dbl(res_lev_size, ~ safe_coef(.x, "lev_shock")),
-  se_lev    = map_dbl(res_lev_size, ~ safe_se(.x, "lev_shock"))
-)␊
-␊
-dd_size_coefs <- tibble(␊
-  horizon   = 0:12,␊
-  beta_size = map_dbl(res_dd_size, ~ safe_coef(.x, "size_shock")),
-  se_size   = map_dbl(res_dd_size, ~ safe_se(.x, "size_shock")),
-  beta_dd   = map_dbl(res_dd_size, ~ safe_coef(.x, "d2d_shock")),
-  se_dd     = map_dbl(res_dd_size, ~ safe_se(.x, "d2d_shock"))
-)␊
+lev_size_coefs <- tibble(
+  horizon   = 0:12,
+  beta_size = map_dbl(res_lev_size, ~ coef(.x)["size_shock"]),
+  se_size   = map_dbl(res_lev_size, ~ sqrt(vcov(.x)["size_shock","size_shock"])),
+  beta_lev  = map_dbl(res_lev_size, ~ coef(.x)["lev_shock"]),
+  se_lev    = map_dbl(res_lev_size, ~ sqrt(vcov(.x)["lev_shock","lev_shock"]))
+)
+
+dd_size_coefs <- tibble(
+  horizon   = 0:12,
+  beta_size = map_dbl(res_dd_size, ~ coef(.x)["size_shock"]),
+  se_size   = map_dbl(res_dd_size, ~ sqrt(vcov(.x)["size_shock","size_shock"])),
+  beta_dd   = map_dbl(res_dd_size, ~ coef(.x)["d2d_shock"]),
+  se_dd     = map_dbl(res_dd_size, ~ sqrt(vcov(.x)["d2d_shock","d2d_shock"]))
+)
 
 # 5a) Gráfico Size × Shock
 p13a <- ggplot(lev_size_coefs, aes(x = horizon, y = beta_size)) +
