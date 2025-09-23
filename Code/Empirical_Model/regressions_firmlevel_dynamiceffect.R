@@ -235,20 +235,20 @@ res_lev_nocy <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ lev_shock + ", all_controls_nocy,
-      " | name + sec + dateq"
+      " | name + sec + Country^dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ Country + dateq + name
+    cluster = ~ Country^dateq
   )
 })
 res_dd_nocy <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       "cumF", h, "_dlog_capital ~ d2d_shock + ", all_controls_nocy,
-      " | name + sec + dateq"
+      " | name + sec + Country^dateq"
     )),
     data    = df_dyn_nocy,
-    cluster = ~ Country + dateq + name
+    cluster = ~ Country^dateq
   )
 })
 
@@ -339,9 +339,9 @@ res_avg <- map(0:12, function(h) {
   fml <- as.formula(paste0(
     dep_var,
     " ~ shock_exp + lev_shock + d2d_shock + ", all_controls,
-    " | name + sec + dateq"
+    " | name + sec + Country^dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
+  feols(fml, data = df_dyn, cluster = ~ Country^dateq)
 })
 
 # 6) Extraer coeficientes y errores estándar para 'shock_exp'
@@ -449,8 +449,8 @@ res_lev_lag <- map(0:12, function(h) {
     "Ldl_capital",
     base_controls
   )
-  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + dateq")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq + name)
+  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + Country^dateq")
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country^dateq)
 })
 
 res_dd_lag <- map(0:12, function(h) {
@@ -461,8 +461,8 @@ res_dd_lag <- map(0:12, function(h) {
     "Ldl_capital",
     base_controls
   )
-  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + dateq")
-  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country + dateq + name)
+  fml_str   <- paste(dep_var, "~", paste(rhs_terms, collapse = " + "), "| name + sec + Country^dateq")
+  feols(as.formula(fml_str), data = df_dyn11, cluster = ~ Country^dateq)
 })
 
 # 7) Extraer coeficientes y errores para plot
@@ -566,9 +566,9 @@ res_avg <- map(0:12, function(h) {
   fml <- as.formula(paste0(
     dep_var,
     " ~ shock_exp + lev_shock + d2d_shock + Ldl_capital + ", all_controls,
-    " | name + sec + dateq"
+    " | name + sec + Country^dateq"
   ))
-  feols(fml, data = df_dyn, cluster = ~ Country + dateq + name)
+  feols(fml, data = df_dyn, cluster = ~ Country^dateq)
 })
 
 # 7) Extraer coeficientes y errores estándar para 'shock_exp'
@@ -684,10 +684,10 @@ res_size <- map(0:12, function(h) {
   feols(
     as.formula(paste0(
       vars_cum[h+1], " ~ size_shock + ", all_controls,
-      " | name + sec + dateq"
+      " | name + sec + Country^dateq"
     )),
     data    = df_dyn12,
-    cluster = ~ Country + dateq + name
+    cluster = ~ Country^dateq
   )
 })
 
@@ -797,10 +797,10 @@ res_lev_size <- map(0:12, function(h) {
     as.formula(paste0(
       vars13[h+1],
       " ~ ", rhs_lev13,
-      " | name + sec + dateq"
+      " | name + sec + Country^dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ Country + dateq + name
+    cluster = ~ Country^dateq
   )
 })
 
@@ -810,10 +810,10 @@ res_dd_size <- map(0:12, function(h) {
     as.formula(paste0(
       vars13[h+1],
       " ~ ", rhs_dd13,
-      " | name + sec + dateq"
+      " | name + sec + Country^dateq"
     )),
     data    = df_dyn13,
-    cluster = ~ Country + dateq + name
+    cluster = ~ Country^dateq
   )
 })
 
