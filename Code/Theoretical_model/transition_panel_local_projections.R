@@ -9,7 +9,6 @@
 # The script only relies on the variables that are available in the simulated
 # panels produced by `transition_path_panel.m`.
 
-
 # =============================================================
 
 suppressPackageStartupMessages({
@@ -50,7 +49,6 @@ data_dir <- Sys.getenv("TRANSITION_PANEL_DIR", unset = default_data_dir)
 output_dir <- Sys.getenv("TRANSITION_OUTPUT_DIR", unset = getwd())
 
 if (!dir.exists(data_dir)) {
-
   stop(
     "The directory with the transition panels does not exist: ",
     data_dir,
@@ -61,7 +59,6 @@ if (!dir.exists(data_dir)) {
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 }
-
 
 # ------------------------------
 # Helper functions
@@ -84,14 +81,11 @@ build_shock_series <- function(max_period, t_pre) {
     shock[pos] <- shock_size * (shock_decay^(h - 1))
   }
   shock * shock_scale
-
 }
 
 winsorize <- function(x, p = winsor_prob) {
   if (all(is.na(x))) {
     return(x)
-
-
   }
   lo <- stats::quantile(x, p, na.rm = TRUE)
   hi <- stats::quantile(x, 1 - p, na.rm = TRUE)
@@ -166,20 +160,19 @@ run_local_projection <- function(df, interaction_col, horizon) {
       n_obs = nrow(reg_data)
     ))
   }
-
   
   interaction_varies_within_period <- reg_data %>%
     dplyr::group_by(quarter_id) %>%
     dplyr::summarise(n_unique = dplyr::n_distinct(interaction), .groups = "drop") %>%
     dplyr::filter(n_unique > 1L) %>%
     nrow() > 0L
-  
+
   interaction_varies_within_firm <- reg_data %>%
     dplyr::group_by(firm_id) %>%
     dplyr::summarise(n_unique = dplyr::n_distinct(interaction), .groups = "drop") %>%
     dplyr::filter(n_unique > 1L) %>%
     nrow() > 0L
-  
+
   if (!interaction_varies_within_period || !interaction_varies_within_firm) {
     return(tibble(
       horizon = horizon,
@@ -190,7 +183,7 @@ run_local_projection <- function(df, interaction_col, horizon) {
   }
 
   model <- fixest::feols(
-     fml = response ~ interaction,
+    fml = response ~ interaction,
     data = reg_data,
     fixef = c("firm_id", "quarter_id"),
     cluster = ~firm_id
@@ -199,7 +192,7 @@ run_local_projection <- function(df, interaction_col, horizon) {
   vcov_mat <- stats::vcov(model)
   coef_val <- stats::coef(model)["interaction"]
   se_val <- sqrt(diag(vcov_mat))["interaction"]
-  
+
   tibble(
     horizon = horizon,
     coefficient = unname(coef_val),
@@ -235,33 +228,6 @@ results <- purrr::map_dfr(panel_files, function(path) {
   shock_series <- build_shock_series(max_q, t_pre)
 
   df <- df %>%
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     dplyr::mutate(
       shock = shock_series[quarter_id],
       lev_shock = lag_lev_dm * shock,
@@ -270,12 +236,12 @@ results <- purrr::map_dfr(panel_files, function(path) {
 
   message("  • ", basename(path), " (t_pre = ", t_pre, ")")
 
-  lev_results <- purrr::map_dfr(horizons, ~ run_local_projection(df, "lev_shock", .x)) %>%
+  lev_results <- purrr::map_dfr(horizons, ~run_local_projection(df, "lev_shock", .x)) %>%
     dplyr::mutate(measure = "leverage")
   
-  dd_results <- purrr::map_dfr(horizons, ~ run_local_projection(df, "dd_shock", .x)) %>%
+  dd_results <- purrr::map_dfr(horizons, ~run_local_projection(df, "dd_shock", .x)) %>%
     dplyr::mutate(measure = "default_distance")
-  
+
   dplyr::bind_rows(lev_results, dd_results) %>%
     dplyr::mutate(
       panel_file = basename(path),
@@ -353,7 +319,6 @@ if (nrow(summary_results) == 0) {
     default_distance = list(title = "Panel (b): Heterogeneidad por distancia al default", colour = "steelblue")
   )
 
-
   plot_list <- purrr::imap(plot_definitions, function(def, measure_key) {
     data <- plot_results %>% dplyr::filter(measure == measure_key)
     if (nrow(data) == 0) {
@@ -369,7 +334,7 @@ if (nrow(summary_results) == 0) {
     figure_title <- paste0(
       "Figura 1: Heterogeneidad financiera en la dinámica de la inversión ante un shock monetario expansivo\n"
     )
-    
+  
     figure_obj <- patchwork::wrap_plots(plotlist = plot_list, nrow = 1) +
       patchwork::plot_annotation(
         title = figure_title,
@@ -380,78 +345,5 @@ if (nrow(summary_results) == 0) {
     ggplot2::ggsave(plot_path, figure_obj, width = 10, height = 5)
     message("Plot saved to: ", plot_path)
   }
-  
-}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  figure_title <- paste0(
-    "Figura 1: Heterogeneidad financiera en la dinámica de la inversión ante un shock monetario expansivo\n"
-  )
-
-  figure_obj <- ggplot(plot_results, aes(x = plot_horizon, y = coefficient, colour = measure, fill = measure)) +
-    geom_ribbon(aes(ymin = ribbon_low, ymax = ribbon_high), alpha = 0.2, linewidth = 0) +
-    geom_line(linewidth = 1) +
-
-
-
-
-
-
-
-
-    geom_point(size = 2) +
-    scale_x_continuous(
-      breaks = seq_len(max_forecast_horizon),
-      limits = c(1, max_forecast_horizon)
-    ) +
-    labs(
-      title = figure_title,
-      x = "Trimestres",
-      y = "Efecto acumulado en la inversión",
-      colour = "Medida",
-      fill = "Medida"
-    ) +
-    theme_minimal(base_size = 13) +
-    theme(
-      panel.grid.minor = element_blank(),
-      plot.title = element_text(face = "plain"),
-      legend.position = "bottom"
-    )
-
-
-
-
-
-
-
-
-  print(figure_obj)
-  ggplot2::ggsave(plot_path, figure_obj, width = 10, height = 5)
-  message("Plot saved to: ", plot_path)
 }
