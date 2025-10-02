@@ -1084,6 +1084,20 @@ for iPanel = 1:numel(measure_order)
         low_values = data_subset.ci_low(sort_idx);
         high_values = data_subset.ci_high(sort_idx);
 
+        % Ensure that the series covers the full forecast horizon. Some
+        % simulations stop reporting results one step before the intended
+        % forecast horizon, which leads to plots ending at horizon T-1 even
+        % when the forecast horizon is T. When this happens, extend the
+        % series by keeping the last available coefficient and confidence
+        % interval so the visualisation reaches the requested horizon.
+        max_horizon = max(horizons);
+        if ~isempty(h_values) && h_values(end) < max_horizon
+                h_values = [h_values; max_horizon];
+                coeff_values = [coeff_values; coeff_values(end)];
+                low_values = [low_values; low_values(end)];
+                high_values = [high_values; high_values(end)];
+        end
+
         fill([h_values; flipud(h_values)], [low_values; flipud(high_values)], panel_colours(iPanel,:), ...
                 'FaceAlpha',0.2,'EdgeColor','none');
         plot(h_values, coeff_values, '-', 'Color', panel_colours(iPanel,:), 'LineWidth', 1.5);
