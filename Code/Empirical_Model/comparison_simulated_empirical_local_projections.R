@@ -42,7 +42,7 @@ emp_horizons <- 0:12
 # Parámetros del shock monetario en el modelo teórico
 shock_length <- 12
 shock_size   <- -0.0025
-shock_decay  <- 0.9
+shock_decay  <- 0.5
 shock_scale  <- -4
 # Probabilidad de winsorización para las variables financieras
 winsor_prob  <- 0.005
