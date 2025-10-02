@@ -10,11 +10,6 @@
 # panels produced by `transition_path_panel.m`.
 
 
-
-
-
-
-
 # =============================================================
 
 suppressPackageStartupMessages({
@@ -25,7 +20,7 @@ suppressPackageStartupMessages({
   library(tibble)
   library(purrr)
   library(ggplot2)
-  library(tidyr)
+  library(patchwork)
 })
 
 # ------------------------------
@@ -60,18 +55,12 @@ if (!dir.exists(data_dir)) {
     "The directory with the transition panels does not exist: ",
     data_dir,
     "\nUse Sys.setenv(TRANSITION_PANEL_DIR = 'path/to/panels') before running the script."
-
-
   )
 }
 
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 }
-
-
-
-
 
 
 # ------------------------------
@@ -153,7 +142,7 @@ prepare_panel <- function(file_path) {
   df
 }
 
-run_local_projection <- function(df, interaction_cols, horizon) {
+run_local_projection <- function(df, interaction_col, horizon) {
   response_col <- paste0("response_h", horizon)
 
   df_h <- df %>%
@@ -164,132 +153,59 @@ run_local_projection <- function(df, interaction_cols, horizon) {
   reg_data <- tibble::tibble(
     firm_id = df_h$firm_id,
     quarter_id = df_h$quarter_id,
-    response = df_h[[response_col]]
+    response = df_h[[response_col]],
+    interaction = df_h[[interaction_col]]
   ) %>%
-    dplyr::bind_cols(df_h[interaction_cols]) %>%
-    tidyr::drop_na(response, dplyr::all_of(interaction_cols))
+    dplyr::filter(!is.na(response), !is.na(interaction))
 
   if (nrow(reg_data) < 2L) {
     return(tibble(
       horizon = horizon,
-      variable = interaction_cols,
       coefficient = NA_real_,
       std_error = NA_real_,
       n_obs = nrow(reg_data)
     ))
   }
 
-  ivalid_vars <- purrr::keep(interaction_cols, function(col) {
-    varies_within_period <- reg_data %>%
-      dplyr::group_by(quarter_id) %>%
-      dplyr::summarise(n_unique = dplyr::n_distinct(.data[[col]]), .groups = "drop") %>%
-      dplyr::filter(n_unique > 1L) %>%
-      nrow() > 0L
-
-    varies_within_firm <- reg_data %>%
-      dplyr::group_by(firm_id) %>%
-      dplyr::summarise(n_unique = dplyr::n_distinct(.data[[col]]), .groups = "drop") %>%
-      dplyr::filter(n_unique > 1L) %>%
-      nrow() > 0L
-
-    varies_within_period && varies_within_firm
-  })
-
-  if (length(valid_vars) == 0L) {
+  
+  interaction_varies_within_period <- reg_data %>%
+    dplyr::group_by(quarter_id) %>%
+    dplyr::summarise(n_unique = dplyr::n_distinct(interaction), .groups = "drop") %>%
+    dplyr::filter(n_unique > 1L) %>%
+    nrow() > 0L
+  
+  interaction_varies_within_firm <- reg_data %>%
+    dplyr::group_by(firm_id) %>%
+    dplyr::summarise(n_unique = dplyr::n_distinct(interaction), .groups = "drop") %>%
+    dplyr::filter(n_unique > 1L) %>%
+    nrow() > 0L
+  
+  if (!interaction_varies_within_period || !interaction_varies_within_firm) {
     return(tibble(
       horizon = horizon,
-      variable = interaction_cols,
       coefficient = NA_real_,
       std_error = NA_real_,
       n_obs = nrow(reg_data)
     ))
   }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  fml <- stats::as.formula(
-    paste("response ~", paste(valid_vars, collapse = " + "))
-  )
-
   model <- fixest::feols(
-     fml = fml,
+     fml = response ~ interaction,
     data = reg_data,
     fixef = c("firm_id", "quarter_id"),
     cluster = ~firm_id
   )
 
   vcov_mat <- stats::vcov(model)
-  coef_vec <- stats::coef(model)[valid_vars]
-  se_vec <- sqrt(diag(vcov_mat))[valid_vars]
-
-  results_tbl <- tibble(
+  coef_val <- stats::coef(model)["interaction"]
+  se_val <- sqrt(diag(vcov_mat))["interaction"]
+  
+  tibble(
     horizon = horizon,
-    variable = valid_vars,
-    coefficient = unname(coef_vec),
-    std_error = unname(se_vec),
+    coefficient = unname(coef_val),
+    std_error = unname(se_val),
     n_obs = stats::nobs(model)
   )
-
-  missing_vars <- setdiff(interaction_cols, valid_vars)
-
-
-
-
-
-  if (length(missing_vars) > 0L) {
-    missing_tbl <- tibble(
-      horizon = horizon,
-      variable = missing_vars,
-      coefficient = NA_real_,
-      std_error = NA_real_,
-      n_obs = nrow(reg_data)
-    )
-    results_tbl <- dplyr::bind_rows(results_tbl, missing_tbl)
-  }
-
-  results_tbl
-
 }
 
 # ------------------------------
@@ -354,23 +270,13 @@ results <- purrr::map_dfr(panel_files, function(path) {
 
   message("  • ", basename(path), " (t_pre = ", t_pre, ")")
 
-  purrr::map_dfr(horizons, ~ run_local_projection(df, c("lev_shock", "dd_shock"), .x)) %>%
-
-
-
-
-
-
-
-    dplyr::mutate(
-      measure = dplyr::case_when(
-        variable == "lev_shock" ~ "leverage",
-        variable == "dd_shock" ~ "default_distance",
-        TRUE ~ variable
-      )
-    ) %>%
-
-
+  lev_results <- purrr::map_dfr(horizons, ~ run_local_projection(df, "lev_shock", .x)) %>%
+    dplyr::mutate(measure = "leverage")
+  
+  dd_results <- purrr::map_dfr(horizons, ~ run_local_projection(df, "dd_shock", .x)) %>%
+    dplyr::mutate(measure = "default_distance")
+  
+  dplyr::bind_rows(lev_results, dd_results) %>%
     dplyr::mutate(
       panel_file = basename(path),
       t_pre = t_pre
@@ -416,8 +322,66 @@ if (nrow(summary_results) == 0) {
       plot_horizon = horizon
     )
 
+  build_panel_plot <- function(data, panel_title, colour, max_horizon) {
+    ggplot(data, aes(x = plot_horizon, y = coefficient)) +
+      geom_ribbon(
+        aes(ymin = ribbon_low, ymax = ribbon_high),
+        fill = colour,
+        alpha = 0.2
+      ) +
+      geom_line(linewidth = 1, colour = colour) +
+      geom_point(size = 2, colour = colour) +
+      scale_x_continuous(
+        breaks = 0:(max_horizon - 1),
+        limits = c(0, max_horizon - 1),
+        labels = function(x) x + 1
+      ) +
+      labs(
+        title = panel_title,
+        x = "Trimestres",
+        y = "Efecto acumulado en la inversión"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(face = "plain")
+      )
+  }
+  
+  plot_definitions <- list(
+    leverage = list(title = "Panel (a): Heterogeneidad por apalancamiento", colour = "firebrick"),
+    default_distance = list(title = "Panel (b): Heterogeneidad por distancia al default", colour = "steelblue")
+  )
 
 
+  plot_list <- purrr::imap(plot_definitions, function(def, measure_key) {
+    data <- plot_results %>% dplyr::filter(measure == measure_key)
+    if (nrow(data) == 0) {
+      return(NULL)
+    }
+    build_panel_plot(data, def$title, def$colour, max_forecast_horizon)
+  }) %>%
+    purrr::compact()
+  
+  if (length(plot_list) == 0) {
+    message("No valid regression results were produced, skipping the plot.")
+  } else {
+    figure_title <- paste0(
+      "Figura 1: Heterogeneidad financiera en la dinámica de la inversión ante un shock monetario expansivo\n"
+    )
+    
+    figure_obj <- patchwork::wrap_plots(plotlist = plot_list, nrow = 1) +
+      patchwork::plot_annotation(
+        title = figure_title,
+        theme = theme(plot.title = element_text(face = "plain"))
+      )
+    
+    print(figure_obj)
+    ggplot2::ggsave(plot_path, figure_obj, width = 10, height = 5)
+    message("Plot saved to: ", plot_path)
+  }
+  
+}
 
 
 
