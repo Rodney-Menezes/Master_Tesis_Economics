@@ -496,7 +496,10 @@ compute_empirical_dynamics <- function(data_path, horizons) {
 sim_results <- compute_simulated_dynamics(transition_dir, sim_horizons)
 emp_results <- compute_empirical_dynamics(empirical_path, emp_horizons)
 
-max_sim_horizon <- max(sim_results$summary$horizon, na.rm = TRUE)
+# Aseguramos que las dinámicas empíricas sólo cubran el mismo horizonte máximo
+# que las simulaciones. Esto evita que la serie empírica muestre un periodo
+# adicional (por ejemplo, 13) cuando el panel simulado sólo alcanza hasta el 12.
+max_sim_horizon <- max(sim_horizons, na.rm = TRUE)
 emp_results <- emp_results %>%
   dplyr::filter(horizon <= max_sim_horizon)
 
