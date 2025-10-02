@@ -496,6 +496,10 @@ compute_empirical_dynamics <- function(data_path, horizons) {
 sim_results <- compute_simulated_dynamics(transition_dir, sim_horizons)
 emp_results <- compute_empirical_dynamics(empirical_path, emp_horizons)
 
+max_sim_horizon <- max(sim_results$summary$horizon, na.rm = TRUE)
+emp_results <- emp_results %>%
+  dplyr::filter(horizon <= max_sim_horizon)
+
 common_horizons <- sort(intersect(sim_results$summary$horizon, emp_results$horizon))
 if (length(common_horizons) == 0) {
   stop("No hay horizontes comunes entre los resultados simulados y empíricos.")
