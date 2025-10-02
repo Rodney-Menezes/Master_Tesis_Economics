@@ -36,7 +36,7 @@ suppressPackageStartupMessages({
 # Configuración
 # ------------------------------
 # Horizonte máximo de interés
-sim_horizons <- 0:13
+sim_horizons <- 0:12
 emp_horizons <- 0:12
 
 # Parámetros del shock monetario en el modelo teórico
@@ -548,7 +548,7 @@ plot_measure <- function(data, panel_title, horizons_axis) {
       fill = NULL,
       linetype = NULL
     ) +
-    theme_minimal(base_size = 13) +
+    theme_minimal(base_size = 12) +
     theme(
       panel.grid.minor = element_blank(),
       plot.title = element_text(face = "plain")
