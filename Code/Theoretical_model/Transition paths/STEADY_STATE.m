@@ -1,8 +1,14 @@
-% Computes and analyzes steady state
-%
-% Pablo Ottonello and Thomas Winberry
-% First draft: September 29nd, 2017
-% This draft: June 27th, 2020
+% -------------------------------------------------------------------------
+% Author: Rodney Menezes
+% Paper: Effects of Monetary Policy on Investment Dynamics 
+% in Latin American Economies through a Model with Heterogeneous Firms
+% Type: Master thesis
+% Title : Steady State (Estado Estacionario)
+% Code  : Extension based on the code of Pablo Ottonello and Thomas Winberry
+% -------------------------------------------------------------------------
+% Computes steady state and initial values
+% -------------------------------------------------------------------------
+
 
 % Housekeeping
 clear all
