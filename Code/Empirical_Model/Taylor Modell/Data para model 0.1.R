@@ -1,3 +1,14 @@
+# -------------------------------------------------------------------------
+# Author : Rodney Menezes
+# Title  : Data constructuion Taylor.
+# Paper: Effects of Monetary Policy on Investment Dynamics 
+# in Latin American Economies through a Model with Heterogeneous Firms
+# Type: Master thesis
+# Title : Transición Dinámica (Dynamic Transition)
+# Code  : Rodney Menezes.
+# Draft  : 17 November 2025
+# License: Academic use permitted.
+# -------------------------------------------------------------------------
 # Cargar librerías necesarias
 library(readxl)
 library(tempdisagg)
