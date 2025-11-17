@@ -1,10 +1,14 @@
-# Script en R para replicar las Tablas 1–2 y la Figura del paper de Ottonello & Winberry (2020)
-# == Instalacion de Paquetes necesarios ==
-
-# ===================================================
-# Script en R para replicar “descriptive_statistics.do”
-# Ottonello & Winberry (2020) adaptado a tu base
-# ===================================================
+# -------------------------------------------------------------------------
+# Author : Rodney Menezes
+# Title  : Descriptive Statistics
+# Paper: Effects of Monetary Policy on Investment Dynamics 
+# in Latin American Economies through a Model with Heterogeneous Firms
+# Type: Master thesis
+# Title : Transición Dinámica (Dynamic Transition)
+# Code  : Rodney Menezes.
+# Draft  : 17 November 2025
+# License: Academic use permitted.
+# -------------------------------------------------------------------------
 
 # 0) Cargar librerías
 library(haven)    # read_dta()
