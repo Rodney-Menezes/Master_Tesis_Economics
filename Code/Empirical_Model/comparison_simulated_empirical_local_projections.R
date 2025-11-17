@@ -2,6 +2,19 @@
 # Comparative Local Projections: Simulated vs Empirical Panels
 # =============================================================
 #
+#
+# -------------------------------------------------------------------------
+# Author : Rodney Menezes
+# Title  : Transition Panel — Local Projections (Empirical vs Theoretical)
+# Paper: Effects of Monetary Policy on Investment Dynamics 
+# in Latin American Economies through a Model with Heterogeneous Firms
+# Type: Master thesis
+# Title : Transición Dinámica (Dynamic Transition)
+# Code  : Rodney Menezes.
+# Draft  : 17 November 2025
+# License: Academic use permitted.
+# -------------------------------------------------------------------------
+#
 # Este script estima las respuestas dinámicas de la inversión ante un shock
 # monetario utilizando (i) los paneles simulados del modelo teórico y (ii) los
 # datos firm-level empleados en el análisis empírico. Posteriormente, grafica
@@ -496,19 +509,31 @@ compute_empirical_dynamics <- function(data_path, horizons) {
 sim_results <- compute_simulated_dynamics(transition_dir, sim_horizons)
 emp_results <- compute_empirical_dynamics(empirical_path, emp_horizons)
 
-# Aseguramos que las dinámicas empíricas sólo cubran el mismo horizonte máximo
-# que las simulaciones. Esto evita que la serie empírica muestre un periodo
-# adicional (por ejemplo, 13) cuando el panel simulado sólo alcanza hasta el 12.
-max_sim_horizon <- max(sim_horizons, na.rm = TRUE)
+# Determinamos el último horizonte con información efectiva en las simulaciones
+# (ignorando los valores completados artificialmente) y usamos ese valor como
+# límite para las proyecciones empíricas. Así se evita que el panel empírico
+# muestre un trimestre adicional cuando el panel simulado se detiene antes.
+max_sim_horizon <- sim_results$summary %>%
+  dplyr::filter(!is.na(coefficient) | !is.na(std_error)) %>%
+  dplyr::summarise(max_h = max(horizon, na.rm = TRUE)) %>%
+  dplyr::pull(max_h)
+
+if (!is.finite(max_sim_horizon)) {
+  max_sim_horizon <- max(sim_horizons, na.rm = TRUE)
+}
+
 emp_results <- emp_results %>%
   dplyr::filter(horizon <= max_sim_horizon)
 
-common_horizons <- sort(intersect(sim_results$summary$horizon, emp_results$horizon))
+sim_summary <- sim_results$summary %>%
+  dplyr::filter(horizon <= max_sim_horizon)
+
+common_horizons <- sort(intersect(sim_summary$horizon, emp_results$horizon))
 if (length(common_horizons) == 0) {
   stop("No hay horizontes comunes entre los resultados simulados y empíricos.")
 }
 
-sim_summary <- sim_results$summary %>%
+sim_summary <- sim_summary %>%
   dplyr::filter(horizon %in% common_horizons) %>%
   dplyr::mutate(dataset = "Simulado (Modelo teórico)")
 
@@ -545,7 +570,7 @@ plot_measure <- function(data, panel_title, horizons_axis) {
     scale_x_continuous(
       breaks = horizons_axis,
       limits = range(horizons_axis),
-      labels = function(x) x + 1
+      labels = function(x) x - min(horizons_axis) + 1
     ) +
     labs(
       title = panel_title,
