@@ -1,7 +1,13 @@
+% -------------------------------------------------------------------------
+% Author: Rodney Menezes
+% Paper: Effects of Monetary Policy on Investment Dynamics 
+% in Latin American Economies through a Model with Heterogeneous Firms
+% Type: Master thesis
+% Title : Transición Dinámica (Dynamic Transition)
+% Code  : Extension based on the code of Pablo Ottonello and Thomas Winberry
+% -------------------------------------------------------------------------
 % Computes and analyzes response to MIT monetary shock
-%
-% Pablo Ottonello and Thomas Winberry
-% This draft: June 27th, 2020
+% -------------------------------------------------------------------------
 
 % Housekeeping
 clear all
@@ -1083,20 +1089,6 @@ for iPanel = 1:numel(measure_order)
         coeff_values = data_subset.coefficient(sort_idx);
         low_values = data_subset.ci_low(sort_idx);
         high_values = data_subset.ci_high(sort_idx);
-
-        % Ensure that the series covers the full forecast horizon. Some
-        % simulations stop reporting results one step before the intended
-        % forecast horizon, which leads to plots ending at horizon T-1 even
-        % when the forecast horizon is T. When this happens, extend the
-        % series by keeping the last available coefficient and confidence
-        % interval so the visualisation reaches the requested horizon.
-        max_horizon = max(horizons);
-        if ~isempty(h_values) && h_values(end) < max_horizon
-                h_values = [h_values; max_horizon];
-                coeff_values = [coeff_values; coeff_values(end)];
-                low_values = [low_values; low_values(end)];
-                high_values = [high_values; high_values(end)];
-        end
 
         fill([h_values; flipud(h_values)], [low_values; flipud(high_values)], panel_colours(iPanel,:), ...
                 'FaceAlpha',0.2,'EdgeColor','none');
