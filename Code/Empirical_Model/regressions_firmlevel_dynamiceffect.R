@@ -1,13 +1,17 @@
-#=====================================================
-# Tesis: 'Efectos de la política monetaria sobre la dinámica de inversión en 
-#         Economías Latinoamericanas mediante un modelo 
-#         con empresas heterogéneas'
-# Autor: Jose Rodney Menezes De la Cruz
-# Sumbit: 2025
-#=====================================================
+# -------------------------------------------------------------------------
+# Author : Rodney Menezes
+# Title  : Dynamic Local Projections Models.
+# Paper: Effects of Monetary Policy on Investment Dynamics 
+# in Latin American Economies through a Model with Heterogeneous Firms
+# Type: Master thesis
+# Title : Transición Dinámica (Dynamic Transition)
+# Code  : Rodney Menezes.
+# Draft  : 17 November 2025
+# License: Academic use permitted.
+# -------------------------------------------------------------------------
 
 # =======================================================
-# Dynamic Local Projections - Modelos con Inversion Neta
+# Dynamic Local Projections 
 # =======================================================
 
 # 0) Cargar librerías necesarias
